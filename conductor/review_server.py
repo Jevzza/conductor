@@ -196,7 +196,14 @@ class H(SimpleHTTPRequestHandler):
         os.makedirs(os.path.dirname(target), exist_ok=True)
         tmp = target + ".tmp"
         json.dump(pins, open(tmp, "w", encoding="utf-8"), indent=1)
-        os.replace(tmp, target)
+        for attempt in range(60):                   # Windows: a reader (e.g. a trainer renderer) can hold it briefly
+            try:
+                os.replace(tmp, target)
+                break
+            except PermissionError:
+                time.sleep(0.05 * (1 + attempt // 10))
+        else:
+            self.send_response(503); self.end_headers(); return
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
         self.wfile.write(b'{"ok":true}')
 

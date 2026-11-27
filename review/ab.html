@@ -145,12 +145,14 @@ function ensureAudio() {
     an = actx.createAnalyser(); an.fftSize = 256; an.smoothingTimeConstant = 0.7; src.connect(an); an.connect(actx.destination); freq = new Uint8Array(an.frequencyBinCount);
   } catch (e) { actx = null; }
 }
-async function loadWave(url) {
-  if (url in waves) return; waves[url] = null;
-  try { const ctx = new OfflineAudioContext(1, 2, 22050); const buf = await ctx.decodeAudioData(await (await fetch(url)).arrayBuffer());
+async function loadWave(url, tries = 0) {
+  if (url in waves && (waves[url] || !tries)) return; waves[url] = null;
+  try { const r = await fetch(url); if (!r.ok) throw new Error(r.status);
+    const ctx = new OfflineAudioContext(1, 2, 22050); const buf = await ctx.decodeAudioData(await r.arrayBuffer());
     const d = buf.getChannelData(0), N = 360, step = Math.floor(d.length / N), out = new Float32Array(N);
     for (let k = 0; k < N; k++) { let m = 0; for (let j = k * step; j < (k + 1) * step; j += 4) m = Math.max(m, Math.abs(d[j])); out[k] = m; }
-    waves[url] = { peaks: out, dur: buf.duration }; } catch (e) {}
+    waves[url] = { peaks: out, dur: buf.duration }; }
+  catch (e) { if (tries < 4) { await new Promise(r => setTimeout(r, 600 * (tries + 1))); return loadWave(url, tries + 1); } }
 }
 
 async function load() {
@@ -461,13 +463,20 @@ function board() {
     lb.appendChild(d); requestAnimationFrame(() => requestAnimationFrame(() => d.querySelector(".bar div").style.width = `${Math.max(3, r.p * 100)}%`)); });
 }
 
+async function saveAnswers() {
+  for (let t = 0; t < 5; t++) {
+    try { const r = await fetch("/ab_answers", { method: "POST", body: JSON.stringify(raw) }); if (r.ok) return true; } catch (e) {}
+    await new Promise(r => setTimeout(r, 500 * (t + 1)));
+  }
+  toast("Couldn't save - it'll be saved with your next answer", "#e0605a"); return false;
+}
 async function submit(all) {
   const q = quads[i]; if (!q) return;
   if (!all && !ready()) return;
   raw.push({ kind: "quad", quad: q, best: all ? null : st.best, worst: all ? null : st.worst, all: all || null,
     fine: all ? null : [0, 1, 2, 3].filter(isFine), hops: st.hops, wrong: st.wrong,
     edits: Object.keys(st.edits).length ? st.edits : undefined, at: new Date().toISOString() });
-  try { await fetch("/ab_answers", { method: "POST", body: JSON.stringify(raw) }); } catch (e) {}
+  await saveAnswers();
   session.n++;
   if (all === "bad") { session.streak = 0; $("card").classList.remove("shake"); void $("card").offsetWidth; $("card").classList.add("shake"); toast("All bad", "#e0605a"); }
   else { session.streak++; const k = all ? 0 : st.best, rc = $("pl" + k).getBoundingClientRect();
