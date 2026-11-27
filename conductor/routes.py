@@ -315,11 +315,18 @@ def _callout(track, kind: str, max_s: float) -> np.ndarray | None:
 
 
 def _hold_level(y: np.ndarray, ref: np.ndarray, max_db: float = 6.0, under_db: float = 1.5) -> np.ndarray:
+    g = _hold_gain(y, ref, max_db, under_db)
+    if g is None:
+        return y
+    return (0.98 * np.tanh(y * g / 0.98)).astype(np.float32)            # soft limit
+
+
+def _hold_gain(y: np.ndarray, ref: np.ndarray, max_db: float = 6.0, under_db: float = 1.5):
     """Make-up gain: keep a lead-in as loud as the music just before it (user 2026-11-24: lead-ins
     dipped 6-10 dB and vanish under a horde). Only ever lifts, follows a smoothed 200 ms loudness,
     and a soft limiter keeps the peaks under full scale."""
     if len(y) < SR // 2 or len(ref) < SR // 4:
-        return y
+        return None
     # loudness as heard: bass carries most of the raw energy but little of the loudness, so a strip that
     # removed the bass got lifted far too high (user 2026-11-24: "now too loud in the blend")
     _, ref_hi = _split(ref, 120.0)
@@ -332,9 +339,7 @@ def _hold_level(y: np.ndarray, ref: np.ndarray, max_db: float = 6.0, under_db: f
     g = np.clip(target / env, 1.0, 10 ** (max_db / 20))
     k = 8                                                              # ~400 ms smoothing, no pumping
     g = np.convolve(np.pad(g, (k, k), mode="edge"), np.ones(2 * k + 1) / (2 * k + 1), mode="same")[k:-k]
-    gain = np.interp(np.arange(len(y)), np.arange(len(g)) * hop + win / 2, g).astype(np.float32)[:, None]
-    out = y * gain
-    return (0.98 * np.tanh(out / 0.98)).astype(np.float32)            # soft limit
+    return np.interp(np.arange(len(y)), np.arange(len(g)) * hop + win / 2, g).astype(np.float32)[:, None]
 
 
 LAYER_STYLES = ("layer4", "layer8", "layer4d", "swap4", "swap8", "swap4d", "swap8d") + tuple(
@@ -558,6 +563,7 @@ def _bandpass(x: np.ndarray, lo: float, hi: float) -> np.ndarray:
 
 
 LAST_LOCK = None
+LAST_SHIFT = 0            # samples the last join's body is longer than the new song's own span (tempo glide)
 
 
 def _drum_lag(a: np.ndarray, b: np.ndarray, beat: float) -> float:
@@ -646,7 +652,7 @@ class _VoxGuard:
 
 
 def _sprinkle_sounds(mix: np.ndarray, A, B, a_ml: np.ndarray, t_new: float, m: int, plan: list, L: int = 4,
-                     loud: bool = False, vg=None, pa=None, pb=None) -> np.ndarray:
+                     loud: bool = False, vg=None, pa=None, pb=None, a_acc=None) -> np.ndarray:
     """User-isolated signature sounds (hook picker "Sounds", 2026-11-24 - e.g. Miasma's high spooky tone).
     B's sound, filtered to the user's band, fades in under the first half as the announcement; A's own
     sound (its live melodic layer through A's band) carries on as the rest of A leaves, then fades."""
@@ -682,7 +688,10 @@ def _sprinkle_sounds(mix: np.ndarray, A, B, a_ml: np.ndarray, t_new: float, m: i
         env = np.clip((x - 0.5) * 4, 0, 1) * np.clip((1 - x) * 4, 0, 1)                     # as A leaves
         if vg is not None:                                 # A's band carries A's voice: never over B singing
             env = env * vg.gate_a_over_b(pb)
-        mix += _hook_level(src, mix, rel_db=-8.0) * env
+        add = _hook_level(src, mix, rel_db=-8.0) * env
+        mix += add
+        if a_acc is not None:
+            a_acc += add
         plan.append({"lane": "A sound", "pts": [(0, 0), (0.5, 0), (0.75, 0.6), (1, 0)]})
     return mix
 
@@ -977,10 +986,10 @@ def _rubberband(y, t0: float, n: int, curve: np.ndarray) -> np.ndarray | None:
         step = int(0.1 * SR)                              # tempo updates every 100 ms of output
         cmds = [f"{(pre * SR + pos[o]) / SR:.4f} rubberband tempo {curve[o]:.5f};" for o in range(0, n, step)]
         open(fc, "w").write("\n".join(cmds))
-        af = (f"asendcmd=f={fc.replace(chr(92), '/').replace(':', chr(92) + ':')},"
+        af = ("asendcmd=f=cmd.txt,"
               f"rubberband=tempo={curve[0]:.5f}:transients=crisp:detector=compound:phase=laminar:window=standard")
-        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", fi, "-af", af, fo], capture_output=True,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))   # no console flashing over the game
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", "in.wav", "-af", af, "out.wav"], capture_output=True,
+                           cwd=d, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))   # relative: no path escaping   # no console flashing over the game
         if r.returncode != 0:
             return None
         out, _ = sf.read(fo, dtype="float32", always_2d=True)
@@ -996,6 +1005,91 @@ def _rubberband(y, t0: float, n: int, curve: np.ndarray) -> np.ndarray | None:
         os.rmdir(d)
 
 
+_RB_LAT = {}
+
+
+def _rb_pitch_run(y: np.ndarray, factor: np.ndarray) -> np.ndarray | None:
+    """Rubber Band pitch-only pass (tempo 1: timing untouched): pitch x factor[i] around output sample i,
+    updated every 50 ms. Returns len(y) samples, its latency removed (measured once with a click)."""
+    import tempfile
+    import soundfile as sf
+    pad = int(0.5 * SR)
+    src = np.concatenate([np.zeros((pad, 2), np.float32), y.astype(np.float32), np.zeros((pad, 2), np.float32)])
+    d = tempfile.mkdtemp(prefix="rbp_")
+    fi, fo, fc = (os.path.join(d, x) for x in ("in.wav", "out.wav", "cmd.txt"))
+    try:
+        sf.write(fi, src, SR, subtype="FLOAT")
+        step = int(0.05 * SR)
+        cmds = [f"{(pad + o) / SR:.4f} rubberband pitch {float(factor[o]):.6f};" for o in range(0, len(y), step)]
+        open(fc, "w").write("\n".join(cmds))
+        af = ("asendcmd=f=cmd.txt,"
+              f"rubberband=tempo=1:pitch={float(factor[0]):.6f}:transients=crisp:detector=compound:"
+              f"phase=laminar:window=standard:pitchq=quality")
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", "in.wav", "-af", af, "out.wav"], capture_output=True,
+                           cwd=d, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))   # relative: no path escaping
+        if r.returncode != 0:
+            print("pitch fix failed:", r.stderr.decode(errors="replace")[-300:], flush=True)
+            return None
+        out, _ = sf.read(fo, dtype="float32", always_2d=True)
+    finally:
+        for f in (fi, fo, fc):
+            if os.path.exists(f):
+                os.remove(f)
+        os.rmdir(d)
+    out = out[:, :2] if out.shape[1] >= 2 else np.repeat(out, 2, 1)
+    return out
+
+
+def _rb_latency() -> int:
+    if "lat" not in _RB_LAT:
+        click = np.zeros((SR, 2), np.float32)
+        click[int(0.3 * SR):int(0.3 * SR) + 32] = 0.8
+        o = _rb_pitch_run(click, np.full(SR, 1.02))
+        _RB_LAT["lat"] = (int(np.argmax(np.abs(o[:, 0]))) - int(0.5 * SR) - int(0.3 * SR)) if o is not None else 0
+    return _RB_LAT["lat"]
+
+
+def _pitch_fix(y: np.ndarray, factor: np.ndarray) -> np.ndarray:
+    """y with its pitch multiplied by factor (per sample), timing unchanged. On failure: y as it was."""
+    if len(y) < SR // 4 or np.abs(factor - 1).max() < 0.002:
+        return y
+    lat = _rb_latency()
+    o = _rb_pitch_run(y, factor)
+    if o is None:
+        return y
+    k = int(0.5 * SR) + lat
+    o = o[k:k + len(y)]
+    if len(o) < len(y):
+        o = np.vstack([o, np.zeros((len(y) - len(o), 2), np.float32)])
+    return o.astype(np.float32)
+
+
+def _glide(a: np.ndarray, b: np.ndarray, m: int, rho: np.ndarray, glide: bool) -> np.ndarray:
+    """The blend (built on B's timeline: a = A's part, b = B's part, A's playback rate there = rho) played on an
+    output timeline whose tempo glides from A's own to B's own (smoothstep, whole blend), with each song's
+    pitch put back. Returns the output-timeline audio (length differs from m when the tempos differ)."""
+    r0 = 1.0 / float(np.mean(rho[:max(1, min(len(rho), SR // 2))])) if glide else 1.0
+    if abs(r0 - 1.0) < 0.002:
+        M, pos, r = m, np.arange(m, dtype=np.float64), np.ones(m)
+    else:
+        M = int(round(m * 2.0 / (r0 + 1.0)))
+        u = np.linspace(0, 1, M)
+        r = r0 + (1.0 - r0) * (u * u * (3 - 2 * u))                   # B-timeline seconds per output second
+        pos = np.concatenate([[0.0], np.cumsum(r)[:-1]])
+        pos *= (m - 1) / pos[-1]                                     # lands exactly where B carries on
+    xs = np.arange(m)
+
+    def at(y):
+        return np.stack([np.interp(pos, xs, y[:, c]) for c in range(2)], 1).astype(np.float32)
+
+    a_o, b_o = (at(a), at(b)) if M != m else (a, b)
+    pa = np.interp(pos, xs, rho) * r                                 # A's pitch as played (resampled twice)
+    a_o = _pitch_fix(a_o, 1.0 / pa)
+    if M != m:
+        b_o = _pitch_fix(b_o, 1.0 / r)
+    return a_o + b_o
+
+
 def _take_speed(y, t0: float, n: int, speed: float, ramp: bool = False, ramp_n: int | None = None) -> np.ndarray:
     """`n` samples of `y` from t0 played at `speed` x tempo, pitch unchanged. With `ramp` the tempo
     glides from normal to `speed` over the first `ramp_n` samples (default: all), then holds."""
@@ -1008,7 +1102,7 @@ def _take_speed(y, t0: float, n: int, speed: float, ramp: bool = False, ramp_n: 
         src = _take(y, t0, n=int(pos[-1]) + 4)
         xs = np.arange(len(src))
         return np.stack([np.interp(pos, xs, src[:, c]) for c in range(2)], 1).astype(np.float32)
-    if STRETCH == "rubberband":
+    if STRETCH in ("rubberband", "glide"):
         out = _rubberband(y, t0, n, curve)
         if out is not None:
             return out
@@ -1038,6 +1132,8 @@ def _overhang(old: np.ndarray, track, t_stop: float, bars: int, speed: float = 1
 def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: float, style: str,
           A, B, riser_from: float | None) -> None:
     """Append `dur` s of `new` (from t_new) to the output, joining from `old` (playing up to t_old)."""
+    global LAST_SHIFT
+    LAST_SHIFT = 0
     from .tempo import period_at
     beat = period_at(A, t_old)
     bar = 4 * beat
@@ -1127,6 +1223,7 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
         # garbage (user 2026-11-24: "sounds like water in my ears"): resample both (DJ pitch fader)
         global STRETCH
         from . import grid
+        glide = STRETCH == "glide"                                  # tempo glide + pitch put back (trainer A/B)
         src = grid.warp_positions(A, t_old, B, t_new, m, SR)       # beat-for-beat: bar lines meet every bar
         keep_st, STRETCH = STRETCH, "resample"
         try:
@@ -1171,6 +1268,7 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
             a_ml *= duck
             plan.append({"lane": "A vocal ducked", "pts": vg.pts(1 - duck)})
         mix = sum(layers[k] * P[k] for k in layers)
+        a_acc = sum(layers[k] * P[k] for k in layers if k.startswith("A ")).copy() if glide else None
         from . import hooks
         hb, ha = hooks.near(B, t_new + m / SR), hooks.near(A, t_old)
         if "B hook" in P and hb is not None:                       # the hook plays from ITS start, where its lane starts
@@ -1197,21 +1295,47 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
             if ha is not None:
                 x0 = next((x for x, v in next(p for p in plan if p["lane"] == "A hook")["pts"] if v > 0), 0)
                 g0 = int(round(x0 * L) / L * m)
-                src = hooks.melodic(A, ha["t"], int((m - g0) * sp) + 4096)
-                _, h = _split(_take_speed(src, 0.0, m - g0, sp), 250.0)
+                src_h = hooks.melodic(A, ha["t"], int((m - g0) * sp) + 4096)
+                if glide:                                   # resampled like the rest of A: one pitch fix for all of A
+                    keep_h, STRETCH = STRETCH, "resample"
+                    try:
+                        _, h = _split(_take_speed(src_h, 0.0, m - g0, sp), 250.0)
+                    finally:
+                        STRETCH = keep_h
+                else:
+                    _, h = _split(_take_speed(src_h, 0.0, m - g0, sp), 250.0)
                 h = _hook_level(h, mix[g0:])
                 on = np.flatnonzero(P["A hook"][g0:, 0] > 0.05)
                 span = int(on[-1]) + 1 if len(on) else m - g0
                 h *= vg.gate(A, ha["t"], g0, span, P["A melody"], P["B melody"], speed=sp)
-                mix[g0:] += h * np.minimum(1.0, P["A hook"][g0:] / 0.5)
+                add = h * np.minimum(1.0, P["A hook"][g0:] / 0.5)
+                mix[g0:] += add
+                if a_acc is not None:
+                    a_acc[g0:] += add
         nlanes = len(plan)
         mix = _sprinkle_sounds(mix, A, B, a_ml, t_new, m, plan, L, loud=loud,    # user-isolated signature sounds
-                               vg=vg, pa=P["A melody"], pb=P["B melody"])
+                               vg=vg, pa=P["A melody"], pb=P["B melody"], a_acc=a_acc)
         LAST_PLAN = LAST_PLAN + plan[nlanes:]                          # show them on the trainer too
-        mix = _hold_level(mix, buf[max(0, n - int(1.5 * SR)):])
-        body[:m] = mix
+        if glide:
+            g = _hold_gain(mix, buf[max(0, n - int(1.5 * SR)):])
+            g = 1.0 if g is None else g
+            if src is not None:
+                rho = np.gradient(src) * SR                             # A seconds per B second
+                k = int(0.25 * SR)
+                rho = np.convolve(np.pad(rho, (k, k), mode="edge"), np.ones(2 * k + 1) / (2 * k + 1), mode="valid")
+            else:
+                rho = _speed_curve(m, sp, ramp=m / SR > RAMP_FROM)
+            g_out = _glide(a_acc * g, (mix - a_acc) * g, m, rho, glide=src is not None)
+            g_out = (0.98 * np.tanh(g_out / 0.98)).astype(np.float32)
+            LAST_SHIFT = len(g_out) - m
+            body = np.concatenate([g_out, body[m:]])
+            M = len(g_out)
+        else:
+            mix = _hold_level(mix, buf[max(0, n - int(1.5 * SR)):])
+            body[:m] = mix
+            M = m
         seams.append(sum(len(p) for p in out) / SR)
-        seams.append(seams[-1] + m / SR)                              # B is fully in
+        seams.append(seams[-1] + M / SR)                              # B is fully in
         out.append(body)
         return None
     elif style in LEAD_STYLES:

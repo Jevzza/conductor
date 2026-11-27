@@ -424,8 +424,11 @@ class LocalPlayer(Player):
             out, seams = [pre], []
             tail = routes._join(out, seams, cur.data, at, data, t_new, r["dur"], r["style"], cur.track, cue.track, None)
             body = out[-1]
-            s0 = int(round(t_new * SR))
+            s0 = int(round(t_new * SR)) - routes.LAST_SHIFT     # a tempo glide makes the blend longer/shorter
             new = data.copy()
+            if s0 < 0:                                          # glide longer than the song's start: make room
+                new = np.concatenate([np.zeros((-s0, new.shape[1]), new.dtype), new])
+                s0 = 0
             n = min(len(body), len(new) - s0)
             new[s0:s0 + n] = body[:n]
             sp = routes._speed(cur.track, at, cue.track, t_new)
