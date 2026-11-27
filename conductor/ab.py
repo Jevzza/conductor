@@ -1022,6 +1022,8 @@ def consistency() -> dict:
     for a in raw:
         if a.get("kind") != "quad" or not a["quad"].get("repeat_of") or a["quad"]["repeat_of"] not in first:
             continue
+        if a["quad"].get("conflict"):            # a labelled tie-breaker, not a blind check of your consistency
+            continue
         f = first[a["quad"]["repeat_of"]]
         o1, o2 = order(f), order(a)
         if not o1 or not o2:

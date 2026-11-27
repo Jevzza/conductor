@@ -46,6 +46,9 @@ canvas.wave { width: 100%; height: 64px; display: block; border-radius: 6px; bac
 .tw .act { display: flex; gap: 6px; margin-top: 4px } .tw .act button { padding: 5px 9px; font-size: 13px }
 .tw .msg { color: var(--muted); font-size: 12px } .btw.on { border-color: #c58be0; background: #c58be022 }
 .pl.tweaked h2::after { content: " ✎ tweaked"; font-size: 12px; color: #c58be0 }
+#conflict { margin: 8px 0 4px; padding: 8px 12px; border: 1px solid #e0a03a; border-radius: 9px; background: #e0a03a1a; color: #f3d9a8; font-size: 14px }
+.cf { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 6px; background: #e0a03a; color: #1a1408; vertical-align: middle }
+.pl.conflicted { box-shadow: inset 0 0 0 1px #e0a03a99 }
 .row { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; color: var(--muted); align-items: center; min-height: 30px }
 .verdict { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px }
 button { font: inherit; padding: 9px 8px; border-radius: 9px; border: 1px solid var(--line); background: #222a35; color: var(--ink); cursor: pointer; transition: transform .08s, border-color .15s, background .15s }
@@ -187,11 +190,16 @@ function show() {
   for (const kk in ED) delete ED[kk];
   $("count").textContent = `Set ${i + 1} of ${quads.length}${q.synthetic ? "  ·  made-up jump" : ""}`;
   $("ctx").innerHTML = ctxHtml(q.context);
+  let cb = $("conflict"); if (!cb) { cb = document.createElement("div"); cb.id = "conflict"; $("ctx").after(cb); }
+  const hot = new Set((q.conflict_pairs || []).flat());
+  cb.hidden = !q.conflict;
+  cb.innerHTML = q.conflict ? `⚠ <b>Conflicting set.</b> Last time you ranked some of these the other way round. Listen closely, especially the options marked <span class="cf">conflict</span>; this answer settles it.` : "";
   const g = $("grid"); g.innerHTML = "";
   q.options.forEach((r, k) => {
     loadWave(q.clips[k]);
     const d = document.createElement("div"); d.className = "pl"; d.id = "pl" + k; d.style.setProperty("--c", `var(--c${k})`);
-    d.innerHTML = `<h2>${L[k]} <span class="eq">${"<i></i>".repeat(5)}</span><kbd>${PLAY[k].toUpperCase()}</kbd></h2>
+    if (hot.has(q.clips[k])) d.classList.add("conflicted");
+    d.innerHTML = `<h2>${L[k]}${hot.has(q.clips[k]) ? ' <span class="cf">conflict</span>' : ""} <span class="eq">${"<i></i>".repeat(5)}</span><kbd>${PLAY[k].toUpperCase()}</kbd></h2>
       <canvas class="wave" id="cv${k}"></canvas><canvas class="lanes" id="ln${k}"></canvas><div class="row hops"></div><div class="row wrongs">Wrong music:</div>
       <div class="verdict"><button class="bbest">★ Best<kbd>${BEST[k]}</kbd></button><button class="bfine">✓ Fine<kbd>${FINE[k]}</kbd></button><button class="bworst">✕ Worst<kbd>${WORST[k].toUpperCase()}</kbd></button></div>
       <div class="row"><button class="btw" title="Edit the lanes: drag points to change when and how loud each layer plays">✎ Tweak</button></div><div class="tw" hidden></div>`;
