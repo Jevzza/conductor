@@ -218,7 +218,7 @@ let pause = 0; for (const id of ["game", "music"]) document.getElementById(id).a
 })();
 // pins (saved to a file on this PC via the local server)
 async function loadPins() { try { pins = await (await fetch("/pins")).json(); } catch (e) { pins = []; } renderPins(); }
-async function savePins() { try { await fetch("/pins", { method: "POST", body: JSON.stringify(pins) }); document.getElementById("pstat").textContent = `${pins.length} saved · Claude can read them`; } catch (e) { document.getElementById("pstat").textContent = "couldn't save"; } }
+async function savePins() { try { await fetch("/pins", { method: "POST", body: JSON.stringify(pins) }); document.getElementById("pstat").textContent = `${pins.length} saved`; } catch (e) { document.getElementById("pstat").textContent = "couldn't save"; } }
 function renderPins() {
   const L = document.getElementById("pinlist"); L.replaceChildren();
   for (const p of pins.filter(p => p.dir === dir).sort((a, b) => a.t - b.t)) { const r = el("div"); r.append(el("time", null, fmt(p.t)), el("span", "status", p.dir), el("span", null, p.text)); r.onclick = () => { pinOpen(p); seek(p.t - 3); }; L.append(r); }
