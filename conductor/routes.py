@@ -1097,9 +1097,14 @@ def _glide(a: np.ndarray, b: np.ndarray, m: int, rho: np.ndarray, glide: bool) -
 
     a_o, b_o = (at(a), at(b)) if M != m else (a, b)
     pa = np.interp(pos, xs, rho) * r                                 # A's pitch as played (resampled twice)
-    a_o = _pitch_fix(a_o, 1.0 / pa)
-    if M != m:
-        b_o = _pitch_fix(b_o, 1.0 / r)
+    _rb_latency()                                                    # calibrate once, before the threads
+    if M != m:                                                       # both songs' fixes at once (separate ffmpegs)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(2) as ex:
+            fa, fb = ex.submit(_pitch_fix, a_o, 1.0 / pa), ex.submit(_pitch_fix, b_o, 1.0 / r)
+            a_o, b_o = fa.result(), fb.result()
+    else:
+        a_o = _pitch_fix(a_o, 1.0 / pa)
     return a_o + b_o
 
 
