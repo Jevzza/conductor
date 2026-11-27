@@ -32,7 +32,41 @@ import threading as _threading
 _TWEAK_LOCK = _threading.Lock()
 
 
+def _feed_procs():
+    """Background trainer renderers (trainer_feed.py) and everything they started (critic, ffmpeg)."""
+    try:
+        import psutil
+    except ImportError:
+        return []
+    out = []
+    for pr in psutil.process_iter(["cmdline"]):
+        try:
+            if any("trainer_feed.py" in c for c in (pr.info["cmdline"] or [])):
+                out += [pr] + pr.children(recursive=True)
+        except Exception:
+            pass
+    return out
+
+
 def _tweak_render(body: dict) -> dict:
+    """Pauses the background renderers while it works, so your tweak comes back in about a second."""
+    paused = []
+    for pr in _feed_procs():
+        try:
+            pr.suspend(); paused.append(pr)
+        except Exception:
+            pass
+    try:
+        return _tweak_render_now(body)
+    finally:
+        for pr in paused:
+            try:
+                pr.resume()
+            except Exception:
+                pass
+
+
+def _tweak_render_now(body: dict) -> dict:
     """Trainer "Tweak": re-render one option of a set with per-lane volume / end changes."""
     sys.path.insert(0, HERE)
     import copy
