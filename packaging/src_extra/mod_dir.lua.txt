@@ -1,0 +1,30 @@
+
+-- Drop-in install: everything lives in this mod's folder (mods/conductor). The game runs from
+-- binaries/, so the mod folder is ..\mods\conductor; made absolute for ShellExecute.
+local function mod_dir()
+	local base = ".."
+	if _ffi then
+		pcall(function()
+			local buf = _ffi.new("char[?]", 1024)
+			local n = _ffi.C.GetCurrentDirectoryA(1024, buf)
+			if n > 0 and n < 1024 then base = _ffi.string(buf, n) .. [[\..]] end
+		end)
+	end
+	return base .. [[\mods\conductor]]
+end
+local MOD_DIR = mod_dir()
+local APP_DIR = MOD_DIR .. [[\app]]
+local APP_EXE = MOD_DIR .. [[\runtime\python\python.exe]]   -- console python, launched hidden: its ffmpeg/pip children share the hidden console
+local APP_ARGS = "-m conductor.boot"
+
+-- Linux (Proton): Conductor runs natively, started by the Steam launch option
+-- (mods/conductor/linux/launch.sh). Never start the Windows python inside Wine.
+local ON_PROTON = false
+if _ffi then
+	ON_PROTON = pcall(function()
+		_ffi.cdef("const char* wine_get_version(void);")
+		local v = _ffi.load("ntdll").wine_get_version()
+		assert(v ~= nil)
+	end)
+end
+if not ON_PROTON and _os and _os.getenv("STEAM_COMPAT_DATA_PATH") then ON_PROTON = true end

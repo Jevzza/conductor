@@ -1,0 +1,23 @@
+# Conductor runtime - pinned (from the dev machine's working env, 2026-11-22)
+# installed into runtime/python by app/conductor/setup.py on first launch
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.11.0+cu128
+torchaudio==2.11.0+cu128
+numpy==2.4.4
+scipy==1.18.1
+scikit-learn==1.9.1
+librosa==1.0.1
+numba==0.65.1
+llvmlite==0.47.0
+soundfile==0.14.0
+sounddevice==0.5.6
+spotdl==4.6.0
+spotipy==2.26.0
+yt-dlp==2026.10.26
+demucs==4.1.0
+allin1==1.1.0
+einops==0.8.2
+huggingface_hub==2.4.0
+transformers==5.23.0
+madmom==0.17.dev0
+beat-this==1.1.0

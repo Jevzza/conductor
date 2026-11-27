@@ -1,0 +1,209 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Critic Distillation</title>
+<style>
+:root{--bg:#121417;--panel:#1a1d22;--fg:#e6e8eb;--muted:#9aa3ae;--line:#2c3139;--brass:#d9a648;--steel:#7fb0e0;--good:#6cc28e;--bad:#e07a6a;--grey:#7d8692}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 "Segoe UI",system-ui,sans-serif;padding:24px max(16px,3vw)}
+main{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.w12{grid-column:span 12}.w7{grid-column:span 7}.w5{grid-column:span 5}.w6{grid-column:span 6}
+@media (max-width:900px){.w7,.w5,.w6{grid-column:span 12}}
+h1{margin:0;font-size:1.6rem}
+h2{margin:0;font-size:1rem}
+.sub,.muted{color:var(--muted)}
+.mono{font-family:Consolas,monospace;font-variant-numeric:tabular-nums}
+.kpis{display:flex;flex-wrap:wrap;gap:10px}
+.kpi{flex:1 1 120px;border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+.kpi b{display:block;font-size:1.35rem;font-family:Consolas,monospace}
+.kpi span{color:var(--muted);font-size:.8rem}
+.track{height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+.track i{display:block;height:100%;background:var(--brass);width:0;transition:width .5s}
+svg text{fill:var(--muted);font-size:11px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.8rem;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-right:6px;animation:p 1.4s infinite}
+@keyframes p{50%{opacity:.25}}
+button.play{background:none;border:1px solid var(--line);color:var(--fg);border-radius:4px;padding:1px 7px;cursor:pointer;font-size:.8rem}
+button.play:hover,button.play.on{border-color:var(--brass);color:var(--brass)}
+.tbl{overflow:auto;max-height:520px;border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:.84rem}
+th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-weight:500}
+td.agree{color:var(--good)}td.disagree{color:var(--bad)}
+.style{font-family:Consolas,monospace;font-size:.78rem;padding:1px 6px;border-radius:3px;background:#22272e}
+.style.same{color:var(--steel)}.style.other{color:var(--brass)}
+.conf{display:inline-block;width:46px;height:6px;background:var(--line);border-radius:3px;vertical-align:middle;margin-left:6px;position:relative;overflow:hidden}
+.conf i{position:absolute;top:0;bottom:0;left:50%}
+.ex{border:1px solid var(--line);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:4px}
+.exrow{display:grid;grid-template-columns:auto 92px 1fr 1fr 1fr;gap:8px;align-items:center;font-size:.82rem}
+.hbar{height:9px;background:var(--line);border-radius:4px;position:relative}
+.hbar i{position:absolute;top:0;bottom:0;border-radius:4px}
+.hbar .mid{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--grey)}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:.85rem}
+.filters label{display:flex;gap:4px;align-items:center;color:var(--muted)}
+.exgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:10px}
+</style>
+<main>
+  <header class="w12" style="display:flex;flex-direction:column;gap:4px">
+    <h1>Teaching the critic your taste</h1>
+    <div class="sub"><span class="pulse" id="pulse"></span><span id="status">connecting…</span></div>
+  </header>
+
+  <section class="card w12">
+    <div class="kpis">
+      <div class="kpi"><b id="k-stage">–</b><span>stage</span></div>
+      <div class="kpi"><b id="k-fold">–</b><span>test fold</span></div>
+      <div class="kpi"><b id="k-epoch">–</b><span>epoch · batch</span></div>
+      <div class="kpi"><b id="k-pairs">–</b><span>training pairs (teacher-labelled + yours)</span></div>
+      <div class="kpi"><b id="k-time">–</b><span>elapsed</span></div>
+    </div>
+    <div class="track"><i id="bar"></i></div>
+  </section>
+
+  <section class="card w7">
+    <h2>Learning curve</h2>
+    <svg id="loss" viewBox="0 0 640 220" width="100%" role="img" aria-label="Loss and fit per training step"></svg>
+    <div class="legend"><span><i style="background:var(--brass)"></i>loss (lower = learning)</span><span><i style="background:var(--good)"></i>fit on training pairs</span><span>one segment per fold · rounds left→right (student → new teacher)</span></div>
+  </section>
+
+  <section class="card w5">
+    <h2>Agreement with your held-out picks</h2>
+    <svg id="chart" viewBox="0 0 460 220" width="100%" role="img" aria-label="Per-fold agreement chart"></svg>
+    <div class="legend"><span><i style="background:var(--grey)"></i>critic alone</span><span><i style="background:var(--steel)"></i>teacher</span><span><i style="background:var(--brass)"></i>student</span><span>dashed = coin toss</span></div>
+    <div class="muted" id="rounds"></div>
+    <div id="verdict"></div>
+  </section>
+
+  <section class="card w12">
+    <h2>Your picks vs the models <span class="muted" id="dec-count"></span></h2>
+    <div class="muted">Each row is one head-to-head you judged, tested on a model that never saw it. The % is how strongly each model prefers <b>your</b> choice: green = agrees with you.</div>
+    <div class="filters">
+      <label><input type="checkbox" id="f-dis"> only where the student disagrees with you</label>
+      <label><input type="checkbox" id="f-flip"> only where student and teacher differ</label>
+      <span class="muted" id="tallies"></span>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>fold</th><th>moment</th><th>your pick</th><th>over</th><th>critic</th><th>teacher</th><th>student</th></tr></thead>
+      <tbody id="dec"></tbody>
+    </table></div>
+  </section>
+
+  <section class="card w12">
+    <h2>What the teacher thinks of changes you've never heard</h2>
+    <div class="muted">The teacher's labels on unrated moments (the most opinionated 8). Bars left of centre = it dislikes, right = it likes. Student = the retrained critic after fold 1. Play them to see if you'd agree.</div>
+    <div class="exgrid" id="pseudo"></div>
+  </section>
+</main>
+<audio id="au"></audio>
+<script>
+const $ = id => document.getElementById(id);
+const au = $("au"); let playing = null;
+function play(url, btn) {
+  if (playing === url) { au.pause(); playing = null; document.querySelectorAll("button.play.on").forEach(b => b.classList.remove("on")); return; }
+  au.src = url; au.play(); playing = url;
+  document.querySelectorAll("button.play.on").forEach(b => b.classList.remove("on")); btn.classList.add("on");
+}
+au.onended = () => { playing = null; document.querySelectorAll("button.play.on").forEach(b => b.classList.remove("on")); };
+document.addEventListener("click", e => { const b = e.target.closest("button.play"); if (b) play(b.dataset.u, b); });
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const sty = (s, same) => `<span class="style ${same ? "same" : "other"}">${esc(s)}${same ? "" : " →"}</span>`;
+const pct = p => `${Math.round(p * 100)}%`;
+const confbar = p => `<span class="conf"><i style="${p >= .5 ? `left:50%;width:${(p - .5) * 100}%;background:var(--good)` : `left:${p * 100}%;width:${(.5 - p) * 100}%;background:var(--bad)`}"></i></span>`;
+const FC = ["#d9a648", "#7fb0e0", "#6cc28e", "#c792ea", "#e07a6a"];
+
+function lossChart(L, epochs) {
+  const W = 640, H = 220, l = 34, b = 22, t = 8;
+  if (!L.length) { $("loss").innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">waiting for the first batch…</text>`; return; }
+  const folds = [...new Set(L.map(p => p.fold))];
+  const seg = (W - l) / 5;
+  const maxL = Math.max(0.8, ...L.map(p => p.loss));
+  const y = v => t + (H - t - b) * (1 - v / maxL), yf = v => t + (H - t - b) * (1 - v);
+  let s = "";
+  for (let v = 0; v <= maxL + 1e-9; v += 0.2) s += `<line x1="${l}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#2c3139"/><text x="${l - 5}" y="${y(v) + 4}" text-anchor="end">${v.toFixed(1)}</text>`;
+  for (let f = 0; f < 5; f++) { s += `<text x="${l + seg * f + seg / 2}" y="${H - 5}" text-anchor="middle">fold ${f + 1}</text>`; if (f) s += `<line x1="${l + seg * f}" x2="${l + seg * f}" y1="${t}" y2="${H - b}" stroke="#2c3139"/>`; }
+  for (const f of folds) {
+    const P = L.filter(p => p.fold === f), x = p => l + seg * (f - 1) + seg * Math.min(1, p.step / epochs);
+    s += `<polyline fill="none" stroke="#d9a648" stroke-width="1.6" points="${P.map(p => `${x(p)},${y(p.loss)}`).join(" ")}"/>`;
+    s += `<polyline fill="none" stroke="#6cc28e" stroke-width="1.2" opacity=".8" points="${P.map(p => `${x(p)},${yf(p.fit)}`).join(" ")}"/>`;
+    const e = P[P.length - 1]; s += `<circle cx="${x(e)}" cy="${y(e.loss)}" r="3" fill="#d9a648"/>`;
+  }
+  $("loss").innerHTML = s;
+}
+function foldChart(R, live) {
+  const W = 460, H = 220, l = 34, b = 22, t = 14, lo = 40, hi = 80;
+  const y = v => t + (H - t - b) * (1 - (v - lo) / (hi - lo));
+  let s = "";
+  for (let v = lo; v <= hi; v += 10) s += `<line x1="${l}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#2c3139"/><text x="${l - 5}" y="${y(v) + 4}" text-anchor="end">${v}%</text>`;
+  s += `<line x1="${l}" x2="${W}" y1="${y(50)}" y2="${y(50)}" stroke="#7d8692" stroke-dasharray="4 4"/>`;
+  const gw = (W - l) / 5;
+  for (let f = 0; f < 5; f++) {
+    const x0 = l + f * gw + gw * .14, bw = gw * .24, d = R.filter(r => r.fold === f + 1).pop();
+    s += `<text x="${l + f * gw + gw / 2}" y="${H - 5}" text-anchor="middle" ${live === f + 1 && !d ? 'style="fill:#d9a648"' : ""}>fold ${f + 1}</text>`;
+    if (!d) continue;
+    [["critic", "#7d8692"], ["teacher", "#7fb0e0"], ["student", "#d9a648"]].forEach(([k, c], i) => {
+      const v = Math.max(lo, Math.min(hi, d[k] * 100));
+      s += `<rect x="${x0 + i * bw}" y="${y(v)}" width="${bw - 3}" height="${y(lo) - y(v)}" fill="${c}" rx="2"/><text x="${x0 + i * bw + (bw - 3) / 2}" y="${y(v) - 3}" text-anchor="middle" style="fill:${c}">${Math.round(d[k] * 100)}</text>`;
+    });
+  }
+  $("chart").innerHTML = s;
+}
+function decisions(D) {
+  const dis = $("f-dis").checked, flip = $("f-flip").checked;
+  const agree = k => D.filter(d => (k === "critic" ? d.critic[0] > d.critic[1] : d[k] > .5)).length;
+  $("tallies").textContent = D.length ? `agrees with you: critic ${agree("critic")}/${D.length} · teacher ${agree("teacher")}/${D.length} · student ${agree("student")}/${D.length}` : "";
+  $("dec-count").textContent = D.length ? `(${D.length} tested so far)` : "(appear after fold 1 trains)";
+  const rows = D.filter(d => (!dis || d.student <= .5) && (!flip || (d.student > .5) !== (d.teacher > .5))).slice().reverse().slice(0, 300);
+  $("dec").innerHTML = rows.map(d => {
+    const cA = d.critic[0] > d.critic[1];
+    return `<tr><td class="mono">${d.fold}</td><td>${esc(d.context)}</td>
+      <td><button class="play" data-u="${esc(d.you)}">▶</button> ${sty(d.you_style, d.you_same)}</td>
+      <td><button class="play" data-u="${esc(d.other)}">▶</button> ${sty(d.other_style, d.other_same)}</td>
+      <td class="mono ${cA ? "agree" : "disagree"}">${d.critic[0].toFixed(2)} vs ${d.critic[1].toFixed(2)}</td>
+      <td class="mono ${d.teacher > .5 ? "agree" : "disagree"}">${pct(d.teacher)}${confbar(d.teacher)}</td>
+      <td class="mono ${d.student > .5 ? "agree" : "disagree"}">${pct(d.student)}${confbar(d.student)}</td></tr>`;
+  }).join("");
+}
+function pseudo(X) {
+  if (!X.length) { $("pseudo").innerHTML = `<div class="muted">appears when fold 1 starts</div>`; return; }
+  const m = Math.max(.01, ...X.flatMap(e => e.clips.map(c => Math.abs(c.teacher))));
+  const ms = Math.max(.01, ...X.flatMap(e => e.clips.map(c => Math.abs(c.student ?? 0))));
+  const hb = (v, max, col) => { const w = Math.min(50, Math.abs(v) / max * 50); return `<div class="hbar"><span class="mid"></span><i style="${v >= 0 ? `left:50%` : `left:${50 - w}%`};width:${w}%;background:${col}"></i></div>`; };
+  $("pseudo").innerHTML = X.map(e => `<div class="ex"><div><b>${esc(e.context)}</b></div>
+    <div class="exrow muted" style="font-size:.74rem"><span></span><span>style</span><span>teacher</span><span>student</span><span>critic P(natural)</span></div>
+    ${e.clips.slice().sort((a, b) => b.teacher - a.teacher).map(c => `<div class="exrow"><button class="play" data-u="${esc(c.url)}">▶</button>${sty(c.style, c.same)}
+      ${hb(c.teacher, m, "#7fb0e0")}${c.student == null ? `<span class="muted">…</span>` : hb(c.student, ms, "#d9a648")}
+      <div class="hbar"><i style="left:0;width:${c.critic * 100}%;background:#7d8692"></i></div></div>`).join("")}</div>`).join("");
+}
+let last = 0;
+async function tick() {
+  let L;
+  try { L = await (await fetch("ab/distill_live.json?" + Date.now())).json(); }
+  catch (e) { $("status").textContent = "waiting for training to start…"; return; }
+  if (L.updated === last) return; last = L.updated;
+  const tr = L.train || {}, stageName = {loading: "loading", folds: "testing", final: "final fit", done: "done"}[L.stage] || L.stage;
+  $("k-stage").textContent = stageName;
+  $("k-fold").textContent = `${L.fold || 0} / ${L.folds}`;
+  $("k-epoch").textContent = tr.epoch ? `R${tr.round || 1}/${L.rounds || 1} · ${tr.epoch}/${L.epochs} · ${tr.batch}/${tr.batches}` : "–";
+  const byR = {}; (L.results || []).forEach(r => { (byR[r.round || 1] ||= []).push(r.student); });
+  $("rounds").innerHTML = Object.keys(byR).length ? "Student by round (avg over folds so far): " + Object.entries(byR).map(([k, v]) => `round ${k}: <b>${Math.round(v.reduce((a, b) => a + b, 0) / v.length * 100)}%</b> (${v.length})`).join(" · ") : "";
+  $("k-pairs").textContent = tr.pseudo != null ? `${tr.pseudo.toLocaleString()} + ${tr.real}` : "–";
+  const el = Math.round(((L.updated || L.started) - L.started)); $("k-time").textContent = `${Math.floor(el / 60)}m ${el % 60}s`;
+  const done = new Set((L.results || []).filter(r => (r.round || 1) === (L.rounds || 1)).map(r => r.fold)).size, inFold = tr.epoch ? (((tr.round || 1) - 1) * L.epochs + (tr.epoch - 1) + tr.batch / tr.batches) / (L.epochs * (L.rounds || 1)) : 0;
+  $("bar").style.width = (L.stage === "done" ? 100 : Math.min(100, (done + (done < L.folds ? inFold : 0)) / L.folds * 100)) + "%";
+  lossChart(L.loss || [], L.epochs * (L.rounds || 1));
+  foldChart(L.results || [], L.fold);
+  window._D = L.decisions || []; decisions(window._D);
+  pseudo(L.pseudo || []);
+  if (L.summary) {
+    const S = L.summary, t = parseFloat(S.teacher), s = parseFloat(S.student), c = parseFloat(S.critic_alone);
+    $("verdict").innerHTML = `Average: critic ${c}% · teacher ${t}% · <b style="color:${s > t ? "#6cc28e" : "#d9a648"}">student ${s}%</b><br>` +
+      (s > t ? (L.saved ? "The student wins and has been saved." : "The student wins; training the final version on everything…") : "The student didn't beat the teacher, so the current setup stays.");
+  }
+  $("status").textContent = L.stage === "done" ? "finished" : `live · updated ${Math.max(0, Math.round(Date.now() / 1000 - L.updated))}s ago`;
+  if (L.stage === "done") $("pulse").style.animationPlayState = "paused";
+}
+$("f-dis").onchange = $("f-flip").onchange = () => decisions(window._D || []);
+tick(); setInterval(tick, 2000);
+</script>

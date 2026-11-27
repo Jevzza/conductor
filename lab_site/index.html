@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Critic Lab</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: three stage cards across the top (dataset → training → AI judge), then one table of
+   your rated transitions with every model's opinion beside yours. Everything refreshes live. */
+:root {
+  --bg: #eef1f4; --panel: #fff; --ink: #18202b; --muted: #5d6877; --line: #d5dbe3; --accent: #b4610b;
+  --good: #1f7a4a; --ok: #8a6a00; --bad: #b3302b; --bar: #3f7fae;
+  --display: "Archivo", "Segoe UI", system-ui, sans-serif; --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #12161c; --panel: #1a2029; --ink: #e6ebf1; --muted: #93a0b1; --line: #2a323e; --accent: #f0a54a;
+  --good: #5fcf8f; --ok: #e5c34f; --bad: #f07a72; --bar: #6aa9d6; color-scheme: dark } }
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--body) }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px 60px; display: grid; gap: 18px }
+h1 { font: 800 30px var(--display); margin: 0 }
+.sub { color: var(--muted); margin: 4px 0 0; max-width: 80ch }
+.stages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px }
+@media (max-width: 900px) { .stages { grid-template-columns: minmax(0, 1fr) } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; display: grid; gap: 8px; align-content: start }
+.card h2 { font: 600 13px var(--body); letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0; display: flex; justify-content: space-between }
+.state { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--line); color: var(--ink); text-transform: none; letter-spacing: 0 }
+.state.live { background: var(--accent); color: #fff }
+.big { font: 600 26px var(--display); font-variant-numeric: tabular-nums }
+.small { font-size: 13px; color: var(--muted) }
+.prog { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden }
+.prog span { display: block; height: 100%; background: var(--accent); transition: width .5s }
+canvas { width: 100%; height: 120px; display: block }
+.mono { font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.kinds { display: grid; gap: 3px; font-size: 12.5px }
+.kinds div { display: grid; grid-template-columns: 7.5em minmax(0, 1fr) 3em; gap: 6px; align-items: center }
+.kinds i { display: block; height: 7px; border-radius: 3px; background: var(--bar) }
+.tablebox { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden }
+.tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line) }
+.tools select, .tools button { font: inherit; font-size: 13.5px; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--ink) }
+.scroll { overflow: auto; max-height: 70vh }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px }
+th, td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle }
+th { position: sticky; top: 0; background: var(--panel); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); z-index: 1 }
+tr.dis td { background: color-mix(in srgb, var(--bad) 9%, transparent) }
+tr.newest td { background: color-mix(in srgb, var(--accent) 16%, transparent) }
+tr.fresh { animation: rowin .9s ease-out }
+@keyframes rowin { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+.follow { font-size: 12.5px; color: var(--muted) }
+.follow.on { color: var(--accent) }
+@media (prefers-reduced-motion: reduce) { tr.fresh { animation: none } }
+.v { font-weight: 600; font-size: 12px; padding: 1px 8px; border-radius: 999px; color: #fff }
+.v.good { background: var(--good) } .v.ok { background: var(--ok) } .v.bad { background: var(--bad) }
+.meter { display: flex; gap: 2px; align-items: flex-end; height: 22px }
+.meter b { width: 7px; background: var(--bar); border-radius: 2px 2px 0 0; opacity: .85 }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums }
+.play { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 2px 8px; cursor: pointer; font: inherit; font-size: 13px }
+.note { color: var(--muted); max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Critic Lab</h1>
+    <p class="sub">The machine-learning side of Conductor, live. Stage 1 builds natural and spliced examples from all 132 songs. Stage 2 trains the critic to tell them apart, scored on songs it has never heard. Stage 3 tests whether an AI audio judge agrees with you. The table puts every model's opinion next to your rating, with disagreements in red. Refreshes every 2 seconds.</p>
+  </header>
+  <section class="stages">
+    <div class="card" id="c-build"><h2>1 · Training data <span class="state" id="s-build">waiting</span></h2>
+      <div class="big" id="b-n">–</div><div class="prog"><span id="b-bar"></span></div>
+      <div class="small">Natural joins from the songs themselves, against joins spliced the way Conductor does</div>
+      <div id="b-recent"></div></div>
+    <div class="card" id="c-train"><h2>2 · Critic training <span class="state" id="s-train">waiting</span></h2>
+      <div class="big" id="t-acc">–</div><div class="small">accuracy on songs it has never heard (natural vs spliced)</div>
+      <canvas id="t-chart"></canvas><div class="kinds" id="t-kinds"></div></div>
+    <div class="card" id="c-judge"><h2>3 · AI judge vs you <span class="state" id="s-judge">waiting</span></h2>
+      <div class="big" id="j-agree">–</div><div class="small" id="j-what">how well it separates your good from your bad (0.5 = coin flip, 1.0 = perfect)</div>
+      <div class="prog"><span id="j-bar"></span></div>
+      <div class="small" id="j-means"></div>
+      <div class="small" id="c-critic"></div></div>
+  </section>
+  <section class="tablebox">
+    <div class="tools">
+      <b>Your 180 rated transitions</b>
+      <label class="small">Show <select id="f"><option value="all">all</option><option value="dis">disagreements</option><option value="bad">your bad ones</option><option value="good">your good ones</option></select></label>
+      <label class="small">Sort <select id="sort"><option value="id">round</option><option value="judge">AI judge score</option><option value="critic">critic score</option><option value="taste">taste score</option></select></label>
+      <span class="small" id="count"></span>
+      <span class="follow" id="follow">following the judge</span>
+    </div>
+    <div class="scroll"><table><thead><tr><th></th><th>You</th><th>AI judge (1–5)</th><th>Its confidence</th><th>Critic: natural?</th><th>Critic: your taste</th><th>Kind</th><th>Your note</th></tr></thead><tbody id="rows"></tbody></table></div>
+  </section>
+</div>
+<audio id="a"></audio>
+<script>
+const J = async n => { try { const r = await fetch(`../cache/lab/${n}.json?_=${Date.now()}`); return r.ok ? r.json() : {}; } catch (e) { return {}; } };
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const audio = document.getElementById("a"); let playing = null;
+function el(t, c, x) { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+function state(id, d, live) { const s = document.getElementById(id); s.textContent = d.done ? "done" : live ? "running" : "waiting"; s.classList.toggle("live", !!live && !d.done); }
+function chart(c, curve) {
+  const r = devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight; c.width = W * r; c.height = H * r;
+  const g = c.getContext("2d"); g.scale(r, r); g.clearRect(0, 0, W, H);
+  g.strokeStyle = css("--line"); g.lineWidth = 1;
+  for (const y of [0.5, 0.75, 1]) { const yy = H - 14 - (y - 0.5) * 2 * (H - 24); g.beginPath(); g.moveTo(28, yy); g.lineTo(W, yy); g.stroke(); g.fillStyle = css("--muted"); g.font = "11px IBM Plex Mono, monospace"; g.fillText(Math.round(y * 100) + "%", 0, yy + 4); }
+  if (!curve.length) return;
+  const n = Math.max(curve.length, 2), x = i => 28 + i / (n - 1) * (W - 34);
+  g.strokeStyle = css("--accent"); g.lineWidth = 2; g.beginPath();
+  curve.forEach((p, i) => { const yy = H - 14 - (Math.max(0.5, p.acc) - 0.5) * 2 * (H - 24); i ? g.lineTo(x(i), yy) : g.moveTo(x(i), yy); }); g.stroke();
+  const last = curve[curve.length - 1]; g.fillStyle = css("--accent"); g.beginPath(); g.arc(x(curve.length - 1), H - 14 - (Math.max(0.5, last.acc) - 0.5) * 2 * (H - 24), 3.5, 0, 7); g.fill();
+}
+const KIND = { natural: "natural", section_move: "section move", bar_jump: "any-bar jump", off_beat: "off beat", cross_song: "other song", cross_tempo: "other tempo", dip: "volume dip" };
+let ROWS = [], CRIT = {}, lastSig = "", lastCount = 0, followPause = 0;
+const scroller = () => document.querySelector(".scroll");
+for (const ev of ["wheel", "touchmove", "pointerdown", "keydown"]) document.addEventListener(ev, e => {
+  if (e.target.closest && e.target.closest(".scroll")) followPause = performance.now() + 5000; }, { passive: true });
+async function refresh() {
+  const [b, t, j, c] = await Promise.all([J("build"), J("train"), J("judge"), J("critic")]);
+  // build
+  state("s-build", b, b.songs_done != null);
+  if (b.songs_total) { document.getElementById("b-n").textContent = `${b.songs_done} / ${b.songs_total} songs`; document.getElementById("b-bar").style.width = (b.songs_done / b.songs_total * 100) + "%"; }
+  else document.getElementById("b-n").textContent = b.last || "–";
+  const br = document.getElementById("b-recent"); br.replaceChildren(...(b.recent || []).slice(-4).map(l => el("div", "mono", l)));
+  // training
+  state("s-train", t, (t.curve || []).length);
+  const curve = t.curve || []; chart(document.getElementById("t-chart"), curve);
+  if (curve.length) {
+    const last = curve[curve.length - 1]; document.getElementById("t-acc").textContent = (last.acc * 100).toFixed(1) + "%  · epoch " + last.epoch + "/" + (t.epochs || "?");
+    const k = document.getElementById("t-kinds"); k.replaceChildren(...Object.entries(last.by_kind || {}).map(([n, v]) => { const d = el("div"); const bar = el("i"); bar.style.width = (v * 100) + "%"; d.append(el("span", null, KIND[n] || n), bar, el("span", "num", Math.round(v * 100) + "%")); return d; }));
+  }
+  // judge
+  const rows = j.rows || []; state("s-judge", j, rows.length);
+  document.getElementById("j-bar").style.width = (j.total ? rows.length / j.total * 100 : 0) + "%";
+  const auc = (arr, key) => { const g = arr.filter(r => r.verdict === "good" && r[key] != null).map(r => r[key]), bd = arr.filter(r => r.verdict === "bad" && r[key] != null).map(r => r[key]); if (!g.length || !bd.length) return null; let s = 0; for (const x of g) for (const y of bd) s += x > y ? 1 : x === y ? .5 : 0; return s / (g.length * bd.length); };
+  const a = auc(rows, "score");
+  document.getElementById("j-agree").textContent = a == null ? (rows.length ? `${rows.length} / ${j.total} rated…` : "–") : `${a.toFixed(2)} agreement`;
+  if (j.verdict) document.getElementById("j-what").textContent = j.verdict;
+  const mean = v => { const x = rows.filter(r => r.verdict === v); return x.length ? (x.reduce((s, r) => s + r.score, 0) / x.length).toFixed(2) : "–"; };
+  document.getElementById("j-means").textContent = rows.length ? `${rows.length}/${j.total} scored · its average for your good ${mean("good")} · okay ${mean("ok")} · bad ${mean("bad")}` : "";
+  CRIT = {}; for (const r of c.rows || []) CRIT[r.id + "|" + r.round] = r;
+  document.getElementById("c-critic").textContent = c.auc_raw != null ? `Critic vs you: ${c.auc_raw.toFixed(2)} from the music alone${c.auc_taste != null ? ` · ${c.auc_taste.toFixed(2)} after learning your taste (on rounds it never saw)` : ""}` : "Critic vs you: waiting for training";
+  ROWS = rows.length ? rows : (c.rows || []);
+  const sig = ROWS.length + "|" + Object.keys(CRIT).length + "|" + (c.auc_taste ?? "") + "|" + playing;
+  if (sig !== lastSig) { lastSig = sig; table(); }
+}
+function table() {
+  const f = document.getElementById("f").value, srt = document.getElementById("sort").value;
+  let rows = ROWS.map(r => ({ ...r, ...(CRIT[r.id + "|" + r.round] || {}) }));
+  const dis = r => (r.score != null && ((r.verdict === "bad" && r.score >= 3.5) || (r.verdict === "good" && r.score <= 2.5))) ||
+                   (r.taste != null && ((r.verdict === "bad" && r.taste >= 0.6) || (r.verdict === "good" && r.taste <= 0.4)));
+  if (f === "dis") rows = rows.filter(dis); else if (f !== "all") rows = rows.filter(r => r.verdict === f);
+  const key = { judge: "score", critic: "p_natural", taste: "taste" }[srt];
+  if (key) rows.sort((a, b) => (a[key] ?? 9) - (b[key] ?? 9));
+  document.getElementById("count").textContent = `${rows.length} shown`;
+  const tb = document.getElementById("rows"); tb.replaceChildren();
+  const judged = ROWS.filter(r => r.score != null).length, grew = judged > lastCount;
+  const newestId = judged ? (ROWS[judged - 1].id + "|" + ROWS[judged - 1].round) : null;
+  let newestRow = null;
+  for (const r of rows) {
+    const tr = el("tr"); if (dis(r)) tr.className = "dis";
+    if (r.id + "|" + r.round === newestId) { tr.classList.add("newest"); if (grew) tr.classList.add("fresh"); newestRow = tr; }
+    const p = el("button", "play", playing === r.file ? "■" : "▶"); p.onclick = () => { if (playing === r.file) { audio.pause(); playing = null; } else { audio.src = "../cache/lab/" + r.file; audio.currentTime = 3; audio.play(); playing = r.file; } table(); };
+    const m = el("div", "meter"); (r.probs || []).forEach(x => { const b = el("b"); b.style.height = Math.max(2, x * 22) + "px"; b.title = (x * 100).toFixed(0) + "%"; m.append(b); });
+    const cells = [p, el("span", "v " + r.verdict, r.verdict), el("span", "num", r.score != null ? r.score.toFixed(2) : "…"), m,
+      el("span", "num", r.p_natural != null ? r.p_natural.toFixed(2) : "–"), el("span", "num", r.taste != null ? r.taste.toFixed(2) : "–"),
+      el("span", null, r.kind), el("span", "note", r.note || "")];
+    for (const x of cells) { const td = el("td"); td.append(x); tr.append(td); }
+    tb.append(tr);
+  }
+  lastCount = judged;
+  follow(newestRow);
+}
+let followTarget = null;
+function follow(row) {
+  const on = row && performance.now() >= followPause && document.getElementById("sort").value === "id";
+  document.getElementById("follow").classList.toggle("on", !!on);
+  document.getElementById("follow").textContent = on ? "following the judge" : (row ? "follow paused" : "");
+  if (on) followTarget = row;
+}
+(function glide() {                     // ease the table towards the row being judged, every frame
+  const box = scroller();
+  if (followTarget && box && performance.now() >= followPause && document.body.contains(followTarget)) {
+    const target = followTarget.offsetTop - box.clientHeight / 2 + followTarget.offsetHeight / 2;
+    const d = target - box.scrollTop;
+    if (Math.abs(d) > 0.5) box.scrollTop += d * 0.12;
+  }
+  requestAnimationFrame(glide);
+})();
+audio.onended = () => { playing = null; table(); };
+document.getElementById("f").onchange = table; document.getElementById("sort").onchange = table;
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>

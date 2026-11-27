@@ -1,0 +1,5 @@
+numpy
+librosa>=0.10
+soundfile
+sounddevice
+spotipy>=2.24

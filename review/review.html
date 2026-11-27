@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mission Review</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the gameplay video large on the left, the two scrolling tickers (game / music) on the
+   right; below, the phase lane with pins. Music is a separate audio layer synced to the video. */
+:root {
+  --bg: #0f1318; --panel: #171d25; --ink: #e6ebf1; --muted: #93a0b1; --line: #2a323e; --accent: #f0a54a;
+  --p-scene: #5d6877; --p-calm: #6aa9d6; --p-t1: #b8c95a; --p-t2: #f0a54a; --p-t3: #f07a72;
+  --display: "Archivo", "Segoe UI", system-ui, sans-serif; --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace; color-scheme: dark;
+}
+* { box-sizing: border-box }
+[hidden] { display: none !important }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14.5px/1.45 var(--body) }
+.wrap { padding: 14px 16px 30px; display: grid; gap: 12px; max-width: 1700px; margin: 0 auto }
+h1 { font: 800 22px var(--display); margin: 0 }
+.top { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(300px, 1fr); gap: 12px; align-items: start }
+@media (max-width: 1000px) { .top { grid-template-columns: minmax(0, 1fr) } }
+video { width: 100%; border-radius: 8px; background: #000; display: block }
+.side { display: grid; gap: 10px; min-width: 0 }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; position: relative; min-width: 0 }
+.col h2 { font: 600 11.5px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 2px 0 4px }
+.ticker { height: 30vh; overflow-y: auto; mask-image: linear-gradient(to bottom, transparent 0, #000 15%, #000 85%, transparent 100%) }
+.ticker::before, .ticker::after { content: ""; display: block; height: calc(15vh - 12px) }
+.nowline { position: absolute; left: 8px; right: 8px; top: calc(26px + 15vh); border-top: 1.5px dashed var(--accent); opacity: .7; pointer-events: none }
+.ev { display: grid; grid-template-columns: 3.8em minmax(0, 1fr); gap: 6px; padding: 3px 5px; border-radius: 5px; cursor: pointer; font-size: 13.5px }
+.ev:hover { background: #ffffff0d }
+.ev.past { opacity: .5 } .ev.live { background: #f0a54a22; opacity: 1 }
+.ev time { font-family: var(--mono); font-size: 12px; color: var(--muted) }
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden }
+.seg button { border: 0; border-radius: 0 }
+button { font: inherit; font-size: 13.5px; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer }
+button[aria-pressed="true"] { background: var(--accent); color: #111 }
+label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center }
+canvas { width: 100%; height: 26px; display: block; cursor: pointer; border-radius: 4px }
+.pinbox { display: grid; gap: 6px; background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 8px 10px }
+.pinbox textarea { font: inherit; width: 100%; min-height: 48px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px }
+.pins { display: grid; gap: 3px; font-size: 13.5px }
+.pins div { display: grid; grid-template-columns: 4em 6em minmax(0, 1fr); gap: 8px; cursor: pointer }
+.pins time { font-family: var(--mono); color: var(--accent) }
+.status { font-size: 12.5px; color: var(--muted) }
+.mono { font-family: var(--mono); font-size: 13px }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Mission Review <span class="status" id="title"></span></h1>
+  <div class="top">
+    <div style="display:grid;gap:8px">
+      <video id="v" src="/video" preload="auto" muted playsinline></video>
+      <div class="pinbox" id="mbox" hidden>
+        <div><b id="mhead"></b> <span class="status" id="msub"></span></div>
+        <canvas id="mlane" style="height:44px" aria-label="The clip: game change (blue), music change (orange), playhead"></canvas>
+        <div class="status"><span style="color:#6aa9d6">▮ game changed</span> &nbsp; <span style="color:#f0a54a">▮ music change (shaded = the fade)</span> &nbsp; white line = now · click/drag the strip to scrub</div>
+        <div class="controls"><button id="mgood" type="button">👍 Good (1)</button><button id="mbad" type="button">👎 Bad (2)</button>
+          <button id="mre" type="button">↻ Replay (R)</button><button id="mprev" type="button">← Prev</button><button id="mnext" type="button">Next → (N)</button>
+          <label><input type="checkbox" id="mskip" checked> skip rated &amp; unchanged</label></div>
+        <textarea id="mnote" placeholder="Bad bit? Pause right after it, then 2 (the spot is saved). Optional note first."></textarea>
+      </div>
+      <div class="controls">
+        <button id="live" type="button" title="Runs the real Conductor app in real time on this mission's telemetry (nothing pre-rendered)" style="border-color:#e05a4a;color:#e05a4a">● Run live (real app)</button>
+        <select id="playlist" title="Playlist for the live run">
+          <option>Darktide II</option><option>Darktide</option><option>Darktide OST</option>
+        </select>
+        <button id="play" type="button">▶ Play</button>
+        <span class="mono" id="time">0:00</span>
+        <div class="seg" role="group" aria-label="Music">
+          <button type="button" data-dir="conductor" aria-pressed="true">Conductor v1</button>
+          <button type="button" data-dir="conductor_v2" aria-pressed="false">Conductor v2</button>
+          <button type="button" data-dir="conductor_v3" aria-pressed="false">v3 (state machine)</button>
+          <button type="button" data-dir="conductor_v4" aria-pressed="false">v4 (learned joins)</button>
+          <button type="button" data-dir="conductor_v5" aria-pressed="false">v5 (model plans everything)</button>
+          <button type="button" data-dir="native" aria-pressed="false">Native</button>
+          <button type="button" data-dir="none" aria-pressed="false">Game only</button>
+        </div>
+        <label>Music <input type="range" id="mvol" min="0" max="1" step="0.05" value="0.5"></label>
+        <label>Game <input type="range" id="gvol" min="0" max="1" step="0.05" value="0.9"></label>
+        <button id="pinbtn" type="button">Pin here (P)</button>
+        <button id="mbtn" type="button">Moments (M)</button>
+        <span class="status">Space play/pause · ←/→ 5 s</span>
+      </div>
+      <div id="livebox" hidden style="border:1px solid #e05a4a;border-radius:6px;padding:8px 10px;margin:6px 0">
+        <div class="status" id="livehead" style="color:#e05a4a">LIVE</div>
+        <div id="livelog" style="margin:6px 0 0;height:340px;overflow:auto;font:12px/1.45 Consolas,monospace;white-space:pre-wrap"></div>
+      </div>
+      <canvas id="lane" aria-label="Game phase over time with your pins; click to seek"></canvas>
+      <div class="pinbox" id="pinbox" hidden>
+        <div class="status" id="pinhead"></div>
+        <textarea id="pinedit" placeholder="What's wrong or right here?"></textarea>
+        <div class="controls"><button id="pinsave" type="button">Save pin</button><button id="pindel" type="button" hidden>Delete</button><button id="pinclose" type="button">Close</button></div>
+      </div>
+    </div>
+    <div class="side">
+      <section class="col"><h2>What the game did</h2><div class="nowline"></div><div class="ticker" id="game"></div></section>
+      <section class="col"><h2>What the music did</h2><div class="nowline"></div><div class="ticker" id="music"></div></section>
+    </div>
+  </div>
+  <section class="col"><h2>Your pins <span class="status" id="pstat"></span></h2><div class="pins" id="pinlist"></div></section>
+</div>
+<audio id="game_a" preload="auto"></audio><audio id="music_a" preload="auto"></audio>
+<script>
+const M = new URLSearchParams(location.search).get("m") || "m8";
+const v = document.getElementById("v"), ga = document.getElementById("game_a"), ma = document.getElementById("music_a");
+ga.src = `${M}/game.mp3`;
+let TL = {}, dir = "conductor", pins = [], openPin = null;
+const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+const css = x => getComputedStyle(document.documentElement).getPropertyValue(x).trim();
+function el(t, c, x) { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+async function loadTL(d) { if (!TL[d]) TL[d] = await (await fetch(`${M}/timeline_${d}.json`)).json(); return TL[d]; }
+async function setDir(d) {
+  if (d !== "none") { try { await loadTL(d); } catch (e) { return; } }
+  dir = d;
+  document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.dir === d)));
+  if (d === "none") { ma.pause(); ma.removeAttribute("src"); } else { ma.src = `${M}/music_${d}.mp3`; ma.currentTime = v.currentTime; if (!v.paused) ma.play().catch(() => {}); }
+  lists(); draw(); renderPins(); moments = []; mi = -1;
+}
+function sync() {                         // keep the audio layers on the video's clock
+  for (const a of [ga, ma]) { if (!a.src) continue; if (Math.abs(a.currentTime - v.currentTime) > 0.15) a.currentTime = v.currentTime; }
+}
+v.addEventListener("play", () => { sync(); ga.play().catch(() => {}); if (dir !== "none") ma.play().catch(() => {}); document.getElementById("play").textContent = "❚❚ Pause"; });
+v.addEventListener("pause", () => { ga.pause(); ma.pause(); document.getElementById("play").textContent = "▶ Play"; });
+v.addEventListener("seeked", sync);
+v.addEventListener("ratechange", () => { ga.playbackRate = ma.playbackRate = v.playbackRate; });
+setInterval(sync, 1000);
+let volTimer = null;
+document.getElementById("mvol").oninput = e => {
+  ma.volume = +e.target.value;
+  if (live.on) { clearTimeout(volTimer); volTimer = setTimeout(() => fetch("/live_volume", { method: "POST", body: JSON.stringify({ volume: +e.target.value }) }), 120); }
+};
+document.getElementById("gvol").oninput = e => ga.volume = +e.target.value;
+ma.volume = 0.5; ga.volume = 0.9;
+document.getElementById("play").onclick = () => v.paused ? v.play() : v.pause();
+document.querySelectorAll(".seg button").forEach(b => b.onclick = () => setDir(b.dataset.dir));
+function seek(t) { v.currentTime = Math.max(0, t); sync(); if (live.on) liveStart(v.currentTime); }
+// ── live: the real app, running in real time on the recorded telemetry ──
+const live = { on: false, poll: null, starting: false, from: 0 };
+async function liveStart(from) {
+  live.on = true; live.starting = true; live.from = from;
+  if (dir !== "none") await setDir("none");          // music comes from the app, not a file
+  v.pause(); document.getElementById("livebox").hidden = false;
+  document.getElementById("live").textContent = "■ Stop live";
+  document.getElementById("livehead").textContent = `LIVE · starting the Conductor app at ${fmt(from)}…`;
+  await fetch("/live_start", { method: "POST", body: JSON.stringify({ from, playlist: document.getElementById("playlist").value, volume: +document.getElementById("mvol").value }) });
+  clearInterval(live.poll); live.poll = setInterval(livePoll, 500);
+}
+async function liveStop() {
+  live.on = false; live.starting = false; clearInterval(live.poll); v.pause();
+  await fetch("/live_stop", { method: "POST", body: "{}" });
+  document.getElementById("live").textContent = "● Run live (real app)";
+  document.getElementById("livehead").textContent = "LIVE stopped";
+}
+async function livePoll() {
+  let st; try { st = await (await fetch("/live_status")).json(); } catch (e) { return; }
+  const lines = (st.log || []).filter(l => l.trim() && !/Song Map|ratings:|listening on/.test(l));
+  const t0 = st.start_wall || 0, esc = x => x.replace(/[&<>]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
+  const box = document.getElementById("livelog"), atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+  box.innerHTML = lines.map(l => {
+    const m = l.match(/^(\d+\.\d+) (.*)$/); const wall = m ? +m[1] : 0, txt = m ? m[2] : l;
+    const vt = t0 && wall >= t0 ? fmt(st.video_from + wall - t0) : "  —";
+    let col = "var(--muted, #9aa3ae)", w = "400";
+    if (txt.startsWith("⚑")) { col = "#f0a54a"; w = "600"; }
+    else if (/^\s+▶/.test(txt)) col = "#6cc28e";
+    else if (txt.startsWith("•")) col = "inherit";
+    return `<div style="color:${col};font-weight:${w}"><span style="opacity:.55">${vt.padStart(5)}  </span>${esc(txt)}</div>`;
+  }).join("");
+  if (atEnd) box.scrollTop = box.scrollHeight;
+  if (st.state === "failed") { document.getElementById("livehead").textContent = "LIVE failed: " + (st.reason || ""); live.on = false; clearInterval(live.poll); return; }
+  if (st.state === "running" && st.start_wall) {
+    const want = st.video_from + (st.now - st.start_wall);
+    if (live.starting) { live.starting = false; v.currentTime = want; v.play(); }
+    else if (Math.abs(v.currentTime - want) > 0.4) v.currentTime = want;   // stay locked to the app's clock
+    document.getElementById("livehead").textContent = `LIVE · the real Conductor app is playing ${st.playlist || ""} (from ${fmt(st.video_from)}) · music is coming from the app, not this page`;
+  }
+}
+document.getElementById("live").onclick = () => live.on ? liveStop() : liveStart(v.currentTime);
+document.getElementById("playlist").onchange = () => { if (live.on) liveStart(v.currentTime); };
+v.addEventListener("pause", () => { if (live.on && !live.starting) liveStop(); });
+function lists() {
+  const tl = TL[dir === "none" ? (TL.conductor_v3 ? "conductor_v3" : "conductor") : dir] || {};
+  for (const col of ["game", "music"]) {
+    const box = document.getElementById(col); box.replaceChildren();
+    for (const e of (tl[col] || [])) { const r = el("div", "ev"); r.dataset.t = e.t; r.append(el("time", null, fmt(e.t)), el("span", null, e.text)); r.onclick = () => seek(e.t - 2); box.append(r); }
+  }
+}
+function draw() {
+  const c = document.getElementById("lane"), r = devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  c.width = W * r; c.height = H * r; const g = c.getContext("2d"); g.scale(r, r);
+  const tl = TL[dir === "none" ? (TL.conductor_v3 ? "conductor_v3" : "conductor") : dir]; if (!tl) return;
+  const dur = tl.duration || v.duration || 1, ph = tl.phases || [];
+  const col = p => p === "explore" ? css("--p-calm") : p === "tier1" ? css("--p-t1") : p === "tier2" ? css("--p-t2") : p === "tier3" ? css("--p-t3") : css("--p-scene");
+  ph.forEach((x, i) => { const end = i + 1 < ph.length ? ph[i + 1].t : dur; g.fillStyle = col(x.phase); g.fillRect(x.t / dur * W, 6, Math.max(1, (end - x.t) / dur * W), H - 6); });
+  for (const m of moments) { const p = momentPin(m); g.fillStyle = p ? (p.rating > 0 ? "#5fbf6a" : "#e0605a") : "#ffffff55"; g.fillRect(m.t / dur * W - 1, H - 6, 3, 6); }
+  for (const p of pins.filter(p => p.dir === dir)) { const x = p.t / dur * W; g.fillStyle = "#fff"; g.beginPath(); g.moveTo(x - 5, 0); g.lineTo(x + 5, 0); g.lineTo(x, 8); g.fill(); }
+  g.fillStyle = css("--accent"); g.fillRect(v.currentTime / dur * W - 1, 0, 2, H);
+}
+document.getElementById("lane").onclick = e => { const r = e.currentTarget.getBoundingClientRect(), dur = (TL[dir] || TL.conductor_v3 || TL.conductor || {}).duration || v.duration;
+  const t = (e.clientX - r.left) / r.width * dur; const near = pins.filter(p => p.dir === dir).find(p => Math.abs(p.t - t) / dur * r.width < 7); if (near) { pinOpen(near); seek(near.t - 3); } else seek(t); };
+// ticker follow
+let pause = 0; for (const id of ["game", "music"]) document.getElementById(id).addEventListener("wheel", () => pause = performance.now() + 4000, { passive: true });
+(function frame() {
+  const now = v.currentTime; document.getElementById("time").textContent = `${fmt(now)} / ${fmt(v.duration || 0)}`;
+  if (performance.now() > pause) for (const id of ["game", "music"]) {
+    const box = document.getElementById(id), rows = [...box.children]; if (!rows.length) continue;
+    let i = -1; for (let k = 0; k < rows.length; k++) { if (+rows[k].dataset.t <= now) i = k; else break; }
+    rows.forEach((r, k) => { r.classList.toggle("past", k < i); r.classList.toggle("live", k === i); });
+    const row = rows[Math.max(0, i)], target = row.offsetTop - box.offsetTop - box.clientHeight / 2 + row.offsetHeight / 2;
+    box.scrollTop += (target - box.scrollTop) * 0.15;
+  }
+  if (mEnd !== null && v.currentTime >= mEnd) { v.pause(); mEnd = null; }
+  drawMoment();
+  draw(); requestAnimationFrame(frame);
+})();
+// pins (saved to a file on this PC via the local server)
+async function loadPins() { try { pins = await (await fetch("/pins")).json(); } catch (e) { pins = []; } renderPins(); }
+async function savePins() { try { await fetch("/pins", { method: "POST", body: JSON.stringify(pins) }); document.getElementById("pstat").textContent = `${pins.length} saved · Claude can read them`; } catch (e) { document.getElementById("pstat").textContent = "couldn't save"; } }
+function renderPins() {
+  const L = document.getElementById("pinlist"); L.replaceChildren();
+  for (const p of pins.filter(p => p.dir === dir).sort((a, b) => a.t - b.t)) { const r = el("div"); r.append(el("time", null, fmt(p.t)), el("span", "status", p.dir), el("span", null, p.text)); r.onclick = () => { pinOpen(p); seek(p.t - 3); }; L.append(r); }
+  document.getElementById("pstat").textContent = pins.length ? `${pins.length} saved` : "";
+}
+function pinOpen(p) { openPin = p; v.pause(); document.getElementById("pinbox").hidden = false; document.getElementById("pinhead").textContent = `Pin at ${fmt(p.t)} · ${p.dir}`; const ed = document.getElementById("pinedit"); ed.value = p.text || ""; document.getElementById("pindel").hidden = !pins.includes(p); ed.focus(); }
+document.getElementById("pinbtn").onclick = () => pinOpen({ t: Math.round(v.currentTime * 10) / 10, dir, text: "" });
+document.getElementById("pinsave").onclick = () => { const t = document.getElementById("pinedit").value.trim(); if (!openPin || !t) return; openPin.text = t; if (!pins.includes(openPin)) pins.push(openPin); document.getElementById("pinbox").hidden = true; renderPins(); savePins(); openPin = null; };
+document.getElementById("pindel").onclick = () => { pins = pins.filter(p => p !== openPin); document.getElementById("pinbox").hidden = true; renderPins(); savePins(); openPin = null; };
+document.getElementById("pinclose").onclick = () => { document.getElementById("pinbox").hidden = true; openPin = null; };
+// ── Moments: every time the game changed state, play 4 s before → 10 s after; rate it, move on.
+const PH = { explore: "Calm", tier1: "Fight", tier2: "Horde", tier3: "Boss", loadout: "Loadout", loading: "Valkyrie", victory: "Victory", defeat: "Defeat", intro: "Mission intro" };
+var moments = [], mi = -1, mEnd = null;
+function buildMoments() {
+  const ph = (TL[dir === "none" ? (TL.conductor_v3 ? "conductor_v3" : "conductor") : dir] || {}).phases || []; moments = []; let prev = null;
+  for (const x of ph) {
+    const last = moments[moments.length - 1];
+    if (last && x.t - last.t < 12) { last.to = x.phase; continue; }
+    moments.push({ t: x.t, from: prev, to: x.phase }); prev = x.phase;
+  }
+  moments.forEach((m, i) => { if (i) m.from = moments[i - 1].to; });
+  // centre each clip on the music's answer (first music change within 15 s), not the game's cue
+  const mus = ((TL[dir === "none" ? (TL.conductor_v3 ? "conductor_v3" : "conductor") : dir] || {}).music || [])
+    .filter(e => /^(→|Song:|drums)/.test(e.text));
+  for (const m of moments) {
+    const r = mus.find(e => e.t >= m.t - 1 && e.t <= m.t + 15);
+    m.music = r ? r.t : null; m.musicText = r ? r.text : "no music change"; m.musicFrom = r && r.from != null ? r.from : null;
+    const c = r ? (m.t + r.t) / 2 : m.t, half = Math.max(7, (r ? r.t - m.t : 0) / 2 + 6);
+    m.a = Math.max(0, c - half); m.b = c + half;
+  }
+}
+function drawMoment() {
+  const c = document.getElementById("mlane"); if (mi < 0 || !c || c.offsetParent === null) return;
+  const m = moments[mi], r = devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  c.width = W * r; c.height = H * r; const g = c.getContext("2d"); g.scale(r, r);
+  const X = t => (t - m.a) / (m.b - m.a) * W;
+  g.fillStyle = "#ffffff12"; g.fillRect(0, 8, W, H - 16);
+  for (let s = Math.ceil(m.a); s <= m.b; s++) { g.fillStyle = "#ffffff30"; g.fillRect(X(s), H - 8, 1, s % 5 ? 3 : 7); }
+  const mark = (t, col, label, y) => { g.fillStyle = col; g.fillRect(X(t) - 2, 4, 4, H - 8); g.font = "12px IBM Plex Sans, sans-serif"; g.fillText(label, Math.min(W - 160, X(t) + 6), y); };
+  mark(m.t, "#6aa9d6", `game: ${PH[m.to] || m.to}`, 18);
+  if (m.music !== null && m.musicFrom !== null && m.musicFrom < m.music - 0.05) {
+    g.fillStyle = "#f0a54a55"; g.fillRect(X(m.musicFrom), 8, X(m.music) - X(m.musicFrom), H - 16);   // the fade
+  }
+  if (m.music !== null) mark(m.music, "#f0a54a", m.musicText.slice(0, 40), 34);
+  const now = v.currentTime; if (now >= m.a && now <= m.b) { g.fillStyle = "#fff"; g.fillRect(X(now) - 1, 0, 2, H); }
+}
+// What was heard around a moment: song + position each second. Identical = nothing changed.
+function sigOf(tl, m) { return (tl.pos || []).filter(p => p[0] >= m.t - 6 && p[0] <= m.t + 12).map(p => p[1] + "@" + Math.round(p[2])).join("|"); }
+async function carryOver() {
+  if (dir === "none" || !moments.length) return 0;
+  const cur = TL[dir], tags = [...new Set(pins.filter(p => p.moment && p.dir.startsWith(dir + "_")).map(p => p.dir))];
+  let n = 0;
+  for (const tag of tags) {
+    let prev; try { prev = await loadTL(tag); } catch (e) { continue; }
+    for (const m of moments) {
+      if (momentPin(m)) continue;
+      const old = pins.find(p => p.moment && p.dir === tag && Math.abs(p.t - m.t) < 0.5);
+      if (old && sigOf(prev, m) && sigOf(prev, m) === sigOf(cur, m)) {
+        pins.push({ ...old, dir, carried: tag }); n++;
+      }
+    }
+  }
+  if (n) { renderPins(); savePins(); }
+  return n;
+}
+function momentPin(m) { return pins.find(p => p.moment && p.dir === dir && Math.abs(p.t - m.t) < 0.5); }
+function playMoment(i, step = 1) {
+  if (!moments.length) buildMoments();
+  if (document.getElementById("mskip").checked) {
+    while (i >= 0 && i < moments.length && momentPin(moments[i])) i += step;
+    if (i >= moments.length) { document.getElementById("mhead").textContent = "All moments rated 🎉"; document.getElementById("msub").textContent = "untick 'skip rated' to replay"; v.pause(); return; }
+  }
+  mi = Math.max(0, Math.min(moments.length - 1, i)); const m = moments[mi];
+  document.getElementById("mbox").hidden = false;
+  document.getElementById("mhead").textContent = `Moment ${mi + 1}/${moments.length} · ${PH[m.from] || m.from || "start"} → ${PH[m.to] || m.to} at ${fmt(m.t)}`;
+  const done = pins.filter(p => p.moment && p.dir === dir).length, ex = momentPin(m);
+  const left = moments.filter(x => !momentPin(x)).length, carried = pins.filter(p => p.moment && p.dir === dir && p.carried).length;
+  document.getElementById("msub").textContent = `${done} rated (${carried} unchanged from last round) · ${left} to go` +
+    (ex ? ` · this one: ${ex.carried ? "unchanged, " : ""}${ex.text}` : "");
+  document.getElementById("mnote").value = "";
+  seek(m.a); mEnd = m.b; v.play();
+}
+function rateMoment(good) {
+  if (mi < 0) return; const m = moments[mi], note = document.getElementById("mnote").value.trim();
+  const ex = momentPin(m); if (ex) pins = pins.filter(p => p !== ex);
+  pins.push({ t: m.t, dir, moment: true, rating: good ? 1 : -1, heard_at: Math.round(v.currentTime * 10) / 10, text: (good ? "👍" : "👎") + ` ${PH[m.from] || ""}→${PH[m.to] || m.to}` + (note ? ": " + note : "") });
+  renderPins(); savePins(); playMoment(mi + 1);
+}
+// scrub the clip strip: click or drag to seek inside the moment
+(function () {
+  const c = document.getElementById("mlane"); let drag = false;
+  const go = e => { if (mi < 0) return; const m = moments[mi], r = c.getBoundingClientRect();
+    const t = m.a + Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (m.b - m.a); seek(t); mEnd = m.b; };
+  c.style.cursor = "pointer";
+  c.addEventListener("pointerdown", e => { drag = true; c.setPointerCapture(e.pointerId); go(e); });
+  c.addEventListener("pointermove", e => { if (drag) go(e); });
+  c.addEventListener("pointerup", e => { drag = false; if (v.paused) v.play(); });
+})();
+document.getElementById("mbtn").onclick = async () => { buildMoments(); await carryOver(); playMoment(mi < 0 ? 0 : mi); };
+document.getElementById("mgood").onclick = () => rateMoment(true);
+document.getElementById("mbad").onclick = () => rateMoment(false);
+document.getElementById("mre").onclick = () => playMoment(mi);
+document.getElementById("mnext").onclick = () => playMoment(mi + 1);
+document.getElementById("mprev").onclick = () => playMoment(mi - 1, -1);
+document.getElementById("mnote").addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); rateMoment(false); }
+  else if ((e.key === "1" || e.key === "2") && !e.target.value.trim()) { e.preventDefault(); rateMoment(e.key === "1"); }
+});
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+  if (e.key === "m") { e.preventDefault(); document.getElementById("mbtn").click(); return; }
+  if (mi >= 0 && (e.key === "1" || e.key === "2")) { e.preventDefault(); rateMoment(e.key === "1"); return; }
+  if (mi >= 0 && e.key === "r") { playMoment(mi); return; }
+  if (mi >= 0 && e.key === "n") { playMoment(mi + 1); return; }
+  if (e.key === " ") { e.preventDefault(); v.paused ? v.play() : v.pause(); }
+  else if (e.key === "p") { e.preventDefault(); document.getElementById("pinbtn").click(); }
+  else if (e.key === "ArrowRight") seek(v.currentTime + 5); else if (e.key === "ArrowLeft") seek(v.currentTime - 5);
+});
+(async () => {
+  let meta = {}; try { meta = await (await fetch(`${M}/meta.json`)).json(); } catch (e) {}
+  for (const d of ["conductor", "conductor_v2", "conductor_v3", "conductor_v4", "conductor_v5", "native"]) {
+    try { await loadTL(d); } catch (e) { const b = document.querySelector(`.seg button[data-dir="${d}"]`); if (b) b.hidden = true; }
+  }
+  const any = TL.conductor_v3 || TL.conductor || TL.native || {};
+  document.getElementById("title").textContent = (any.source || "") + " · real gameplay + Conductor";
+  await loadPins();
+  await setDir(TL.conductor_v5 ? "conductor_v5" : TL.conductor_v4 ? "conductor_v4" : TL.conductor_v3 ? "conductor_v3" : "conductor");
+  if (meta.start) { const go = () => seek(meta.start); if (v.readyState >= 1) go(); else v.addEventListener("loadedmetadata", go, { once: true }); }
+})();
+</script>
+</body>
+</html>

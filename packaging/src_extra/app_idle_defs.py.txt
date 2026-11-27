@@ -1,0 +1,39 @@
+def _idle(args, cfg, lock) -> bool:
+    """No songs yet (fresh install): keep the heartbeat so the mod sees the app, accept "Add playlist"
+    from the mod options, and come back with music once a playlist is ready. True = restart now."""
+    from . import addlist
+    tail = FileTail(args.events)
+    catching_up, last_check, started = True, time.monotonic(), False
+    while True:
+        for ev in tail.poll():
+            if ev.kind == "user" and not catching_up and ev.data.get("action") == "add_playlist":
+                _handle_user(ev, None, None, None)
+                started = True
+        catching_up = False
+        try:                     # heartbeat with "idle" as the rating line: the mod keeps the game's own music
+            with open(STATUS_PATH + ".tmp", "w", encoding="utf-8") as f:
+                f.write("\nidle\n" + f"{int(time.time())}\n{_feedback['id']}|{_feedback['text']}\n")
+            os.replace(STATUS_PATH + ".tmp", STATUS_PATH)
+        except OSError:
+            pass
+        try:
+            line = open(addlist.PROGRESS, encoding="utf-8").readline().split("|")
+            if started and len(line) >= 3 and line[2] == "done":
+                lock.close()
+                return True
+        except OSError:
+            pass
+        if time.monotonic() - last_check > 3:
+            last_check = time.monotonic()
+            if not _game_running(cfg.get("game_process", "")):
+                return False
+        time.sleep(0.5)
+
+
+def _restart(args) -> None:
+    """Start a fresh copy of the app (the new playlist loads at start-up)."""
+    exe = sys.executable
+    subprocess.Popen([exe, "-m", "conductor", "run", "--background"], cwd=os.getcwd(),
+                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+

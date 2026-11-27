@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Join Trainer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800;900&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root { --bg:#0d1116; --panel:#161c24; --ink:#e6ebf1; --muted:#93a0b1; --line:#2a323e; --accent:#f0a54a; --a:#6aa9d6; --b:#c58be0; --good:#5fbf6a; --bad:#e0605a;
+  --display:"Archivo","Segoe UI",system-ui,sans-serif; --body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  --pulse: 0; --hue: var(--a); color-scheme: dark; }
+* { box-sizing: border-box } [hidden] { display: none !important }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 var(--body); min-height:100vh; overflow-x:hidden }
+body::before { content:""; position:fixed; inset:-20%; z-index:-1; pointer-events:none;
+  background: radial-gradient(40% 35% at 30% 20%, color-mix(in srgb, var(--hue) calc(6% + var(--pulse) * 22%), transparent), transparent 70%),
+              radial-gradient(35% 30% at 75% 80%, color-mix(in srgb, var(--accent) calc(3% + var(--pulse) * 10%), transparent), transparent 70%);
+  transition: background .08s linear }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 18px 16px 40px; display: grid; grid-template-columns: 1fr 290px; gap: 14px; align-items: start }
+@media (max-width: 980px) { .wrap { grid-template-columns: 1fr } }
+.main { display: grid; gap: 14px; min-width: 0 }
+header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap }
+h1 { font: 900 26px var(--display); margin: 0; letter-spacing: -.01em }
+h1 span { color: var(--accent) }
+.sub { color: var(--muted); font-size: 13.5px }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 12px; position: relative }
+.ctx { font: 800 20px var(--display); display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
+.ctx .st { padding: 2px 10px; border-radius: 999px; font: 700 14px var(--display); background: #ffffff10 }
+.ctx .arrow { color: var(--accent); animation: nudge 1.4s ease-in-out infinite }
+@keyframes nudge { 50% { transform: translateX(4px) } }
+.st.calm { color:#7fd1c2 } .st.fight { color:#f0c060 } .st.horde { color:#f08a4a } .st.boss { color:#ff5a6a; text-shadow: 0 0 12px #ff5a6a66 }
+.progress { height: 8px; background: #ffffff10; border-radius: 4px; overflow: hidden; position: relative }
+.progress div { height: 100%; background: linear-gradient(90deg, var(--accent), #ffd27a); width: 0; transition: width .5s cubic-bezier(.2,.9,.3,1.3); box-shadow: 0 0 12px var(--accent) }
+.players { display: grid; grid-template-columns: 1fr 1fr; gap: 12px } @media (max-width: 640px) { .players { grid-template-columns: 1fr } }
+.pl { border: 2px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; cursor: pointer; align-content: start;
+  transition: border-color .15s, box-shadow .15s, transform .15s; position: relative; overflow: hidden }
+.pl:hover { transform: translateY(-1px) }
+.pl.playing { border-color: var(--c); box-shadow: 0 0 calc(10px + var(--pulse) * 30px) color-mix(in srgb, var(--c) 45%, transparent) }
+.pl.a { --c: var(--a) } .pl.b { --c: var(--b) }
+.pl h2 { margin: 0; font: 900 22px var(--display); color: var(--c); display: flex; align-items: center; gap: 8px }
+.pl h2 .eq { display: inline-flex; gap: 2px; align-items: end; height: 16px; opacity: 0 } .pl.playing h2 .eq { opacity: 1 }
+.eq i { width: 3px; background: var(--c); border-radius: 1px; height: 4px; transition: height .06s }
+canvas.wave { width: 100%; height: 72px; display: block; border-radius: 6px; background: #ffffff08; cursor: crosshair }
+.choices { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px } @media (max-width: 640px) { .choices { grid-template-columns: 1fr 1fr } }
+button { font: inherit; padding: 10px 8px; border-radius: 9px; border: 1px solid var(--line); background: #222a35; color: var(--ink); cursor: pointer; transition: transform .08s, border-color .15s, background .15s }
+button:hover { border-color: var(--accent) } button:active { transform: scale(.96) }
+.choices button { font-weight: 600; padding: 12px 8px }
+#c1:hover { border-color: var(--a); background: #6aa9d61a } #c2:hover { border-color: var(--b); background: #c58be01a }
+#c3:hover { border-color: var(--bad); background: #e0605a1a } #c4:hover { border-color: var(--good); background: #5fbf6a1a }
+kbd { font: 12px var(--mono); color: var(--muted); margin-left: 4px }
+.hops { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; color: var(--muted); min-height: 32px; align-items: center }
+.hop { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 7px; padding: 2px 6px }
+.hop .nm { color: var(--ink) }
+.hop button, .wrong { padding: 2px 7px; font-size: 13px; background: transparent }
+.hop button.on.g { background: #5fbf6a33; border-color: var(--good); animation: pop .25s } .hop button.on.b { background: #e0605a33; border-color: var(--bad); animation: pop .25s }
+.wrong.on { background: #e0605a33; border-color: var(--bad); color: var(--ink); animation: pop .25s }
+@keyframes pop { 40% { transform: scale(1.25) } }
+.card.shake { animation: shake .35s } @keyframes shake { 20%,60% { transform: translateX(-6px) } 40%,80% { transform: translateX(6px) } }
+.card.flash-a .pl.a, .card.flash-b .pl.b { animation: win .45s } @keyframes win { 30% { transform: scale(1.03); box-shadow: 0 0 40px var(--c) } }
+.toast { position: fixed; left: 50%; top: 22%; transform: translate(-50%, 0) scale(.6); font: 900 44px var(--display); pointer-events: none; opacity: 0; z-index: 10; text-shadow: 0 4px 30px #000 }
+.toast.go { animation: toast .9s ease-out } @keyframes toast { 15% { opacity: 1; transform: translate(-50%, 0) scale(1.08) } 70% { opacity: 1; transform: translate(-50%, -10px) scale(1) } 100% { opacity: 0; transform: translate(-50%, -40px) scale(.95) } }
+#fx { position: fixed; inset: 0; pointer-events: none; z-index: 9 }
+.side { display: grid; gap: 14px; position: sticky; top: 14px }
+.side h3 { margin: 0; font: 800 15px var(--display); letter-spacing: .02em; text-transform: uppercase; color: var(--muted) }
+.big { font: 900 34px var(--display); line-height: 1 } .big small { font: 500 13px var(--body); color: var(--muted); margin-left: 6px }
+.statrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px }
+.streak { font: 800 15px var(--display); color: var(--accent); min-height: 22px }
+.lb { display: grid; gap: 7px }
+.lb .row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 13px; transition: transform .3s }
+.lb .row .bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: #ffffff10; overflow: hidden }
+.lb .row .bar div { height: 100%; border-radius: 3px; transition: width .6s cubic-bezier(.2,.9,.3,1.2) }
+.lb .row .n { font: 12px var(--mono); color: var(--muted) }
+.lb .row.bump { animation: bump .6s } @keyframes bump { 30% { transform: translateX(6px); color: var(--accent) } }
+.done { text-align: center; padding: 30px 10px } .stat { font: 13px var(--mono); color: var(--muted) }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px }
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div class="toast" id="toast"></div>
+<div class="wrap">
+  <div class="main">
+    <header><h1>Join <span>Trainer</span></h1><div class="sub">Which change sounds better at this moment in the game?</div></header>
+    <div class="progress"><div id="bar"></div></div>
+    <div class="card" id="card">
+      <div class="stat" id="count"></div>
+      <div class="ctx" id="ctx"></div>
+      <div class="players">
+        <div class="pl a" id="pa"><h2>A <span class="eq" id="eqa"></span><kbd>Q</kbd></h2><canvas class="wave" id="ca"></canvas><div class="hops" id="ha"></div><div class="hops" id="wa"></div></div>
+        <div class="pl b" id="pb"><h2>B <span class="eq" id="eqb"></span><kbd>W</kbd></h2><canvas class="wave" id="cb"></canvas><div class="hops" id="hb"></div><div class="hops" id="wb"></div></div>
+      </div>
+      <div class="choices">
+        <button id="c1">A is better<kbd>1</kbd></button>
+        <button id="c2">B is better<kbd>2</kbd></button>
+        <button id="c3">Both bad<kbd>3</kbd></button>
+        <button id="c4">Both fine<kbd>4</kbd></button>
+      </div>
+      <label class="sub" style="display:flex;align-items:center;gap:10px">Volume <input type="range" id="vol" min="0" max="1" step="0.01" style="flex:1;accent-color:var(--accent)"> <span id="volv" class="stat"></span></label>
+      <details><summary>How to rate</summary><div class="sub">Each clip: 6 s before the change, then the change. Orange lines = where the music switches; blue = no splice, the song plays on into its own drop. On two-change clips you can 👍/👎 each change on its own, then still pick overall. "Wrong song" = that song doesn't suit the game moment, however well it's joined. Click a clip (or Q / W) to play; click its waveform to jump. Space stops. Backspace undoes.</div></details>
+    </div>
+    <div class="card done" id="done" hidden><div class="ctx" style="justify-content:center">All done for tonight 🎉</div><div class="sub" id="donesub"></div></div>
+  </div>
+  <aside class="side">
+    <div class="card">
+      <h3>This session</h3>
+      <div class="statrow">
+        <div><div class="big" id="sPicks">0</div><div class="sub">picks</div></div>
+        <div><div class="big" id="sLeft">0</div><div class="sub" id="sEta">left</div></div>
+      </div>
+      <div class="streak" id="streak"></div>
+      <div class="stat" id="sAll"></div>
+    </div>
+    <div class="card">
+      <h3>Style leaderboard</h3>
+      <div class="sub" style="margin-top:-6px">👍 share from all your ratings</div>
+      <div class="lb" id="lb"></div>
+    </div>
+  </aside>
+</div>
+<audio id="au" preload="auto" crossorigin="anonymous"></audio>
+<script>
+const au = document.getElementById("au");
+const $ = id => document.getElementById(id);
+let quadAns = [], pairs = [], answers = [], i = 0, playing = null, marks = { a: [], b: [] }, wrong = { a: [], b: [] };
+let session = { picks: 0, t0: Date.now(), streak: 0 }, waves = {}, prevRank = {};
+const NAMES = { natural: "Song's own drop", dj: "DJ swap", djverb: "Reverb wash", djblend: "Overhang", xfade1: "1-bar blend", xfade2: "2-bar blend",
+  xfade4: "4-bar blend", echo: "Echo out", cut: "Hard cut", punch: "Punch", filter: "Filter sweep", riser: "Riser", drop: "Silent drop", auto: "Auto" };
+const STATE = { Calm: "calm", Fight: "fight", Horde: "horde", Boss: "boss" };
+// the parts a clip plays: before the first change, then after each change (song + position)
+const partsOf = r => {
+  const steps = r.steps || [], one = steps.length < 2;
+  return [{ part: 0, label: "Before change", song: r.a, t: r.t_out - 1, state: "from" }]
+    .concat(steps.map((s, k) => ({ part: k + 1, label: one ? "After change" : `After ${k + 1}`, song: s.b, t: s.t_in + 0.5,
+      state: k === steps.length - 1 ? "to" : "between" })));
+};
+
+// ── audio analysis (drives the glow, the mini EQ and the background pulse) ──
+let actx, an, freq;
+function ensureAudio() {
+  if (actx) { actx.resume(); return; }
+  try {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = actx.createMediaElementSource(au); an = actx.createAnalyser(); an.fftSize = 256; an.smoothingTimeConstant = 0.7;
+    src.connect(an); an.connect(actx.destination); freq = new Uint8Array(an.frequencyBinCount);
+  } catch (e) { actx = null; }
+}
+for (const w of ["a", "b"]) $("eq" + w).innerHTML = "<i></i>".repeat(5);
+
+// ── waveform overviews of each clip ──
+async function loadWave(url) {
+  if (waves[url]) return waves[url];
+  try {
+    const ctx = new OfflineAudioContext(1, 2, 22050);
+    const buf = await ctx.decodeAudioData(await (await fetch(url)).arrayBuffer());
+    const d = buf.getChannelData(0), N = 400, step = Math.floor(d.length / N), out = new Float32Array(N);
+    for (let k = 0; k < N; k++) { let m = 0; for (let j = k * step; j < (k + 1) * step; j += 4) m = Math.max(m, Math.abs(d[j])); out[k] = m; }
+    waves[url] = { peaks: out, dur: buf.duration };
+  } catch (e) { waves[url] = null; }
+  return waves[url];
+}
+
+async function load() {
+  pairs = await (await fetch("ab/pairs.json?" + Date.now())).json();
+  try { answers = await (await fetch("/ab_answers")).json(); } catch (e) { answers = []; }
+  quadAns = answers.filter(a => !a.pair); answers = answers.filter(a => a.pair);   // four-way answers live on ab.html
+  const done = new Set(answers.map(a => a.pair.id));
+  pairs = pairs.filter(p => !done.has(p.id));
+  board(false); show();
+}
+function ctxHtml(c) {
+  const [f, t] = c.split(" → ");
+  return `<span class="st ${STATE[f] || ""}">${f}</span><span class="arrow">→</span><span class="st ${STATE[t] || ""}">${t}</span>`;
+}
+function show() {
+  $("bar").style.width = `${pairs.length ? 100 * i / pairs.length : 100}%`;
+  stats();
+  if (i >= pairs.length) {
+    $("card").hidden = true; $("done").hidden = false;
+    $("donesub").textContent = `${answers.length} picks so far in total. New pairs appear after the next training run.`;
+    au.pause(); confetti(innerWidth / 2, innerHeight / 3, ["#f0a54a", "#6aa9d6", "#c58be0", "#5fbf6a"], 160); return;
+  }
+  $("card").hidden = false; $("done").hidden = true;
+  const p = pairs[i];
+  $("count").textContent = `Pair ${i + 1} of ${pairs.length}${p.synthetic ? "  ·  made-up jump" : ""}`;
+  $("ctx").innerHTML = ctxHtml(p.context);
+  marks = { a: [], b: [] }; wrong = { a: [], b: [] };
+  for (const w of ["a", "b"]) {
+    loadWave(p["clip_" + w]);
+    // wrong music is about a PART of a song (a song can fit the fight but not the calm after it)
+    const wb = $("w" + w); wb.innerHTML = "Wrong music for the moment:";
+    partsOf(p[w] || {}).forEach(part => {
+      const bt = document.createElement("button"); bt.className = "wrong"; bt.textContent = part.label;
+      bt.title = `${part.song} @ ${Math.round(part.t)} s`;
+      bt.addEventListener("click", e => { e.stopPropagation(); const at = wrong[w].findIndex(x => x.part === part.part);
+        at < 0 ? wrong[w].push(part) : wrong[w].splice(at, 1); bt.classList.toggle("on", at < 0); });
+      wb.appendChild(bt);
+    });
+    const box = $("h" + w), seams = p["seams_" + w] || [], steps = (p[w] || {}).steps || [];
+    box.innerHTML = "";
+    seams.forEach((_, k) => {
+      const st = (steps[k] || {}).style || "";
+      if (seams.length < 2 && st !== "natural") { const d = document.createElement("span"); d.className = "hop"; d.innerHTML = `<span class="nm">${NAMES[st] || st}</span>`; box.appendChild(d); return; }
+      const d = document.createElement("span"); d.className = "hop";
+      d.innerHTML = `${k + 1}. <span class="nm">${NAMES[st] || st}</span> <button class="g">👍</button><button class="b">👎</button>`;
+      d.querySelectorAll("button").forEach(bt => bt.addEventListener("click", e => {
+        e.stopPropagation();
+        const v = bt.classList.contains("g") ? 1 : -1;
+        marks[w][k] = marks[w][k] === v ? 0 : v;
+        d.querySelector(".g").classList.toggle("on", marks[w][k] === 1);
+        d.querySelector(".b").classList.toggle("on", marks[w][k] === -1);
+        if (marks[w][k]) { const r = bt.getBoundingClientRect(); confetti(r.x + r.width / 2, r.y, [v > 0 ? "#5fbf6a" : "#e0605a"], 14); }
+      }));
+      box.appendChild(d);
+    });
+  }
+  play("a");
+}
+function play(which, at) {
+  const p = pairs[i]; if (!p) return;
+  ensureAudio();
+  const src = which === "a" ? p.clip_a : p.clip_b;
+  if (!au.src.endsWith(src)) au.src = src;
+  au.currentTime = at != null ? at : 0; au.play().catch(() => {}); playing = which;
+  $("pa").classList.toggle("playing", which === "a"); $("pb").classList.toggle("playing", which === "b");
+  document.documentElement.style.setProperty("--hue", which === "a" ? "var(--a)" : "var(--b)");
+}
+
+// ── per-frame drawing ──
+let level = 0;
+function draw() {
+  if (an && !au.paused) {
+    an.getByteFrequencyData(freq);
+    let bass = 0; for (let k = 1; k < 8; k++) bass += freq[k]; bass /= 7 * 255;
+    level = Math.max(level * 0.88, bass);
+    const eq = $("eq" + playing); if (eq) [...eq.children].forEach((b, k) => { const f = freq[2 + k * 9] / 255; b.style.height = `${3 + f * 13}px`; });
+  } else level *= 0.92;
+  document.documentElement.style.setProperty("--pulse", Math.max(0, (level - 0.35) * 1.6).toFixed(3));
+  const p = pairs[i] || {};
+  for (const w of ["a", "b"]) {
+    const c = $("c" + w), r = devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+    if (c.width !== W * r) { c.width = W * r; c.height = H * r; }
+    const g = c.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, W, H);
+    const wv = waves[p["clip_" + w]], seams = p["seams_" + w] || [p.seam || 6];
+    const dur = (wv && wv.dur) || (au.duration && playing === w ? au.duration : Math.max(...seams) + 6);
+    const pos = playing === w ? au.currentTime / dur : -1;
+    const col = w === "a" ? "#6aa9d6" : "#c58be0";
+    if (wv) {
+      const N = wv.peaks.length, bw = W / N;
+      for (let k = 0; k < N; k++) {
+        const h = Math.max(1, wv.peaks[k] * (H - 8)), x = k * bw, played = k / N < pos;
+        const near = playing === w && Math.abs(k / N - pos) < 0.012;
+        g.fillStyle = played ? col : "#ffffff30";
+        const boost = near ? 1 + level * 0.5 : 1;
+        g.fillRect(x, (H - h * boost) / 2, Math.max(1, bw - 0.6), h * boost);
+      }
+    }
+    const steps = ((p[w] || {}).steps) || [];
+    seams.forEach((seam, k) => {
+      const nat = (steps[k] || {}).style === "natural", x = seam / dur * W;
+      g.fillStyle = nat ? "#6aa9d6" : "#f0a54a"; g.fillRect(x - 1, 0, 2, H);
+      g.fillStyle = "#cfd7e2"; g.font = "600 11px IBM Plex Sans";
+      g.fillText(seams.length > 1 ? `${k + 1}${nat ? " drop" : ""}` : "change", x + 4, 12);
+    });
+    if (pos >= 0) { g.fillStyle = "#fff"; g.shadowColor = col; g.shadowBlur = 10; g.fillRect(pos * W - 1, 0, 2, H); g.shadowBlur = 0; }
+  }
+  fxStep();
+  requestAnimationFrame(draw);
+}
+
+// ── particles ──
+const fx = $("fx"), fg = fx.getContext("2d"); let parts = [];
+function confetti(x, y, colors, n) {
+  for (let k = 0; k < n; k++) parts.push({ x, y, vx: (Math.random() - 0.5) * 9, vy: -Math.random() * 9 - 2, life: 1, c: colors[k % colors.length], s: 3 + Math.random() * 4, r: Math.random() * 6 });
+}
+function fxStep() {
+  if (fx.width !== innerWidth) { fx.width = innerWidth; fx.height = innerHeight; }
+  fg.clearRect(0, 0, fx.width, fx.height);
+  parts = parts.filter(q => q.life > 0);
+  for (const q of parts) {
+    q.x += q.vx; q.y += q.vy; q.vy += 0.32; q.vx *= 0.985; q.life -= 0.016; q.r += 0.2;
+    fg.save(); fg.globalAlpha = Math.max(0, q.life); fg.fillStyle = q.c; fg.translate(q.x, q.y); fg.rotate(q.r); fg.fillRect(-q.s / 2, -q.s / 2, q.s, q.s * 0.6); fg.restore();
+  }
+}
+function toast(text, color) { const t = $("toast"); t.textContent = text; t.style.color = color; t.classList.remove("go"); void t.offsetWidth; t.classList.add("go"); }
+
+// ── session stats + leaderboard ──
+function stats() {
+  const left = Math.max(0, pairs.length - i), mins = (Date.now() - session.t0) / 60000;
+  const rate = session.picks / Math.max(mins, 0.5);
+  $("sPicks").textContent = session.picks; $("sLeft").textContent = left;
+  $("sEta").textContent = session.picks >= 3 && left ? `left · ~${Math.ceil(left / rate)} min` : "left";
+  $("sAll").textContent = `${answers.length} picks all-time${session.picks >= 3 ? ` · ${rate.toFixed(1)}/min` : ""}`;
+  const s = session.streak;
+  $("streak").textContent = s >= 3 ? `${"🔥".repeat(Math.min(5, Math.floor(s / 3)))} ${s} in a row` : "";
+}
+function tally() {
+  const t = {};
+  const add = (st, v) => { if (!st || st === "auto") return; t[st] = t[st] || { g: 0, n: 0 }; t[st].n++; if (v > 0) t[st].g++; };
+  for (const a of answers) {
+    const p = a.pair;
+    for (const w of ["a", "b"]) {
+      const steps = (p[w] && p[w].steps) || [], hm = (a.hops || {})[w] || [];
+      steps.forEach((s, k) => {
+        if (hm[k]) return add(s.style, hm[k]);
+        if (steps.length > 1) return;
+        if (a.choice === "both_good") add(s.style, 1); else if (a.choice === "both_bad") add(s.style, -1);
+        else if (a.choice === "a" || a.choice === "b") add(s.style, a.choice === w ? 1 : -1);
+      });
+    }
+  }
+  return Object.entries(t).filter(([, v]) => v.n >= 3).map(([k, v]) => ({ k, g: v.g, n: v.n, p: v.g / v.n })).sort((x, y) => y.p - x.p);
+}
+function board(animate) {
+  const rows = tally(), lb = $("lb"); lb.innerHTML = "";
+  rows.forEach((r, k) => {
+    const d = document.createElement("div"); d.className = "row";
+    if (animate && prevRank[r.k] != null && prevRank[r.k] > k) d.classList.add("bump");
+    const hue = Math.round(r.p * 120);
+    d.innerHTML = `<span>${NAMES[r.k] || r.k}</span><span class="n">${Math.round(r.p * 100)}% · ${r.n}</span><div class="bar"><div style="width:0;background:hsl(${hue} 60% 55%)"></div></div>`;
+    lb.appendChild(d);
+    requestAnimationFrame(() => requestAnimationFrame(() => d.querySelector(".bar div").style.width = `${Math.max(3, r.p * 100)}%`));
+    prevRank[r.k] = k;
+  });
+}
+
+async function answer(choice) {
+  const p = pairs[i]; if (!p) return;
+  answers.push({ pair: p, choice, hops: marks, wrong_song: wrong, at: new Date().toISOString() });
+  try { await fetch("/ab_answers", { method: "POST", body: JSON.stringify(answers.concat(quadAns)) }); } catch (e) {}
+  session.picks++;
+  const card = $("card"), btn = $({ a: "c1", b: "c2", both_bad: "c3", both_good: "c4" }[choice]).getBoundingClientRect();
+  card.classList.remove("shake", "flash-a", "flash-b"); void card.offsetWidth;
+  if (choice === "a" || choice === "b") {
+    session.streak++; card.classList.add("flash-" + choice);
+    const col = choice === "a" ? "#6aa9d6" : "#c58be0";
+    toast(`${choice.toUpperCase()} wins`, col); confetti(btn.x + btn.width / 2, btn.y, [col, "#f0a54a", "#ffffff"], 40);
+  } else if (choice === "both_bad") { session.streak = 0; card.classList.add("shake"); toast("Both bad", "#e0605a"); }
+  else { session.streak++; toast("Both fine", "#5fbf6a"); confetti(btn.x + btn.width / 2, btn.y, ["#5fbf6a", "#ffffff"], 30); }
+  if (session.picks % 10 === 0) setTimeout(() => { toast(`${session.picks} done!`, "#f0a54a"); confetti(innerWidth / 2, innerHeight / 2, ["#f0a54a", "#6aa9d6", "#c58be0", "#5fbf6a"], 120); }, 500);
+  board(true);
+  i++; show();
+}
+function undo() { if (!i) return; answers.pop(); fetch("/ab_answers", { method: "POST", body: JSON.stringify(answers.concat(quadAns)) }); session.picks = Math.max(0, session.picks - 1); session.streak = 0; i--; board(false); show(); }
+for (const w of ["a", "b"]) {
+  $("p" + w).addEventListener("click", e => { if (e.target.tagName !== "CANVAS" && e.target.tagName !== "BUTTON") play(w); });
+  $("c" + w).addEventListener("click", e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(), wv = waves[(pairs[i] || {})["clip_" + w]];
+    play(w, (e.clientX - r.left) / r.width * ((wv && wv.dur) || au.duration || 12)); });
+}
+$("c1").onclick = () => answer("a"); $("c2").onclick = () => answer("b"); $("c3").onclick = () => answer("both_bad"); $("c4").onclick = () => answer("both_good");
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  const k = e.key.toLowerCase();
+  if (k === "q") play("a"); else if (k === "w") play("b");
+  else if (k === "1") answer("a"); else if (k === "2") answer("b"); else if (k === "3") answer("both_bad"); else if (k === "4") answer("both_good");
+  else if (k === " ") { e.preventDefault(); au.paused ? au.play() : au.pause(); } else if (k === "backspace") { e.preventDefault(); undo(); }
+});
+{ let v = 0.7; try { const s = localStorage.getItem("ab_vol"); if (s != null) v = +s; } catch (e) {}
+  const set = x => { au.volume = x; $("vol").value = x; $("volv").textContent = Math.round(x * 100) + "%"; try { localStorage.setItem("ab_vol", x); } catch (e) {} };
+  $("vol").addEventListener("input", e => set(+e.target.value));
+  set(v); }
+setInterval(stats, 15000);
+load(); draw();
+</script>
+</body>
+</html>

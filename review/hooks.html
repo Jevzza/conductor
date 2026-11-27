@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hook Picker</title>
+<style>
+:root { --bg:#0d1116; --panel:#161c24; --ink:#e6ebf1; --muted:#93a0b1; --line:#2a323e; --accent:#f0a54a; --good:#5fbf6a; --bad:#e0605a; --mono: ui-monospace, Consolas, monospace }
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, sans-serif }
+main { max-width: 760px; margin: 0 auto; padding: 16px }
+h1 { font-size: 22px; margin: 4px 0 2px } h1 span { color: var(--accent) }
+.sub { color: var(--muted); font-size: 13px; margin-bottom: 12px }
+.bar { position: sticky; top: 0; background: var(--bg); padding: 8px 0; z-index: 2; display: flex; gap: 10px; align-items: center }
+.prog { flex: 1; height: 8px; background: #ffffff10; border-radius: 4px; overflow: hidden } .prog div { height: 100%; background: var(--accent); width: 0; transition: width .3s }
+.song { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 10px 0 }
+.song.done { border-color: #5fbf6a66 } .song.none { border-color: #e0605a55; opacity: .8 }
+.t { font-weight: 600; margin-bottom: 8px }
+.row { display: flex; flex-wrap: wrap; gap: 8px }
+button { font: inherit; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line); background: #222a35; color: var(--ink); cursor: pointer; min-width: 48px }
+button.play.on { border-color: var(--accent); box-shadow: 0 0 12px #f0a54a55 }
+button.pick.on { background: #5fbf6a33; border-color: var(--good) }
+button.nonebtn.on { background: #e0605a33; border-color: var(--bad) }
+.c { display: inline-flex; gap: 2px } .c button { min-width: 0 } .c .play { border-radius: 9px 0 0 9px } .c .pick { border-radius: 0 9px 9px 0; padding: 10px 9px }
+kbd, .k { font: 12px var(--mono); color: var(--muted) }
+.filter { display: flex; gap: 8px; margin: 6px 0 }
+.srow { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center } .srow .lab { color: var(--muted); font-size: 13px }
+.panel { margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #0f141b; display: grid; gap: 8px }
+.panel label { display: grid; grid-template-columns: 70px 1fr 64px; gap: 8px; align-items: center; font-size: 13px; color: var(--muted) }
+.panel input[type=range] { width: 100% }
+.panel canvas { width: 100%; height: 90px; display: block; border-radius: 6px; background: #ffffff06 }
+.spec { position: relative; overflow: auto; max-height: 620px; border-radius: 8px; background: #000; touch-action: pan-x pan-y }
+.spec img { display: block; max-width: none; image-rendering: auto; user-select: none; -webkit-user-drag: none }
+.spec canvas { position: absolute; left: 0; top: 0; cursor: crosshair; touch-action: none }
+.zoom { display: flex; gap: 6px; align-items: center; font: 12px var(--mono); color: var(--muted) } .zoom button { padding: 4px 10px; min-width: 0 }
+.sinfo { font: 12px var(--mono); color: var(--muted) }
+.saved { font: 12px var(--mono); color: var(--good) } .saved button { padding: 2px 7px; min-width: 0; margin-left: 4px }
+</style>
+</head>
+<body>
+<main>
+  <h1>Hook <span>Picker</span></h1>
+  <div class="sub">For each song: play the candidates and tick every one that's a real hook (the bits you'd recognise it by) - as many as you like. "None" if none of them are.<br>
+Sounds: &#9654; S plays the song's melodic layer (no drums/bass) where its high end is most exposed. Drag the low/high cut until only the sound you want is left (the spectrum shows where it lives), then "Save this sound". Picks save as you go and replace the automatic guess.</div>
+  <div class="bar"><div class="prog"><div id="pg"></div></div><span id="cnt" class="k"></span></div>
+  <div class="filter"><input id="q" placeholder="Search songs..." style="flex:1;font:inherit;padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:#222a35;color:var(--ink)"><button id="todo">Only unpicked</button><button id="all">Show all</button></div>
+  <div id="list"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const au = new Audio();
+let songs = [], picks = {}, playing = null, query = "";
+let onlyTodo = true; try { onlyTodo = localStorage.getItem("hooks_all") !== "1"; } catch (e) {}
+async function load() {
+  songs = await (await fetch("hooks/songs.json?" + Date.now())).json();
+  try { const p = await (await fetch("/hook_picks")).json(); picks = Array.isArray(p) ? {} : p; } catch (e) { picks = {}; }
+  render();
+}
+function save() { fetch("/hook_picks", { method: "POST", body: JSON.stringify(picks) }); stats(); }
+function stats() {
+  const n = songs.filter(s => picks[s.title] !== undefined).length;
+  $("pg").style.width = (100 * n / Math.max(1, songs.length)) + "%"; $("cnt").textContent = `${n}/${songs.length}`;
+}
+// a song's picks: "none", or a list of hooks (older single picks are one-item lists)
+const pickList = p => p === "none" || p === undefined ? [] : Array.isArray(p) ? p : [p];
+const isHook = (h, c) => h.t === c.t && h.kind !== "sound";
+function toggle(s, c) {
+  const cur = pickList(picks[s.title]), i = cur.findIndex(h => isHook(h, c));
+  const next = i >= 0 ? cur.filter((_, k) => k !== i) : cur.concat([{ t: c.t, len: c.len, bars: c.bars, kind: c.kind, picked: true }]);
+  if (next.length) picks[s.title] = next; else delete picks[s.title];
+  save();
+}
+function render() {
+  const L = $("list"); L.innerHTML = "";
+  songs.forEach(s => {
+    const p = picks[s.title];
+    if (query) { if (!s.title.toLowerCase().includes(query)) return; }      // a search shows matches, picked or not
+    else if (onlyTodo && p !== undefined) return;
+    const d = document.createElement("div");
+    d.className = "song" + (p === "none" ? " none" : p ? " done" : "");
+    d.innerHTML = `<div class="t"></div><div class="row"></div>`;
+    d.querySelector(".t").textContent = s.title;
+    const row = d.querySelector(".row");
+    s.cands.forEach((c, k) => {
+      const w = document.createElement("span"); w.className = "c";
+      const pl = document.createElement("button"); pl.className = "play"; pl.textContent = `▶ ${k + 1}${c.kind === "vocal" ? " 🎤" : ""}`;
+      pl.title = `${Math.floor(c.t / 60)}:${String(Math.round(c.t % 60)).padStart(2, "0")}`;
+      pl.onclick = () => { if (playing === pl && !au.paused) { au.pause(); pl.classList.remove("on"); return; }
+        document.querySelectorAll(".play.on").forEach(b => b.classList.remove("on"));
+        unfiltered();                                     // user 2026-11-24: hook clips never filtered
+        au.src = c.clip; au.play(); pl.classList.add("on"); playing = pl; au.onended = () => pl.classList.remove("on");
+        if (s.spec && d._sw) specPanel(d._sw, s, pl, d._sw._showSaved, { t0: c.t, t1: c.t + c.len }, true); };
+      const pk = document.createElement("button"); pk.className = "pick" + (pickList(p).some(h => isHook(h, c)) ? " on" : ""); pk.textContent = "✓";
+      pk.onclick = () => { toggle(s, c); render1(d, s); };
+      w.append(pl, pk); row.appendChild(w);
+    });
+    const nb = document.createElement("button"); nb.className = "nonebtn" + (p === "none" ? " on" : ""); nb.textContent = "None";
+    nb.onclick = () => { picks[s.title] = "none"; save(); render1(d, s); };
+    row.appendChild(nb);
+    if (s.spec) { d._sw = soundRow(s); d.appendChild(d._sw); }
+    L.appendChild(d);
+  });
+  stats();
+}
+function render1(d, s) {           // mark the row picked; it stays in view until the list is re-shown
+  const p = picks[s.title], L = pickList(p);
+  d.className = "song" + (p === "none" ? " none" : L.length ? " done" : "");
+  d.querySelectorAll(".pick").forEach((b, k) => b.classList.toggle("on", L.some(h => isHook(h, s.cands[k]))));
+  d.querySelector(".nonebtn").classList.toggle("on", p === "none");
+}
+// signature sounds: play the melodic layer through a live band filter, save the band
+let actx = null, chain = null, raf = 0;
+function audio() {
+  if (actx) return chain;
+  actx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = actx.createMediaElementSource(au), hp = actx.createBiquadFilter(), lp = actx.createBiquadFilter(), an = actx.createAnalyser();
+  hp.type = "highpass"; lp.type = "lowpass"; hp.Q.value = 0.9; lp.Q.value = 0.9; an.fftSize = 4096;
+  src.connect(hp); hp.connect(lp); lp.connect(an); an.connect(actx.destination);
+  chain = { hp, lp, an }; return chain;
+}
+const LOG = v => Math.round(40 * Math.pow(16000 / 40, v / 1000)), INV = hz => Math.round(1000 * Math.log(hz / 40) / Math.log(16000 / 40));
+function unfiltered() { au.ontimeupdate = null; au.loop = false; if (chain) setBand(10, 22000, false); }
+function setBand(lo, hi, iso) { const c = audio(); c.hp.frequency.value = iso ? lo : 10; c.lp.frequency.value = iso ? hi : 22000; }
+const mmss = t => `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, "0")}`;
+function soundRow(s) {
+  const w = document.createElement("div");
+  w.innerHTML = `<div class="srow"><span class="lab">Sounds:</span></div><div class="saved"></div>`;
+  const row = w.querySelector(".srow"), saved = w.querySelector(".saved");
+  const showSaved = () => {
+    const L = pickList(picks[s.title]).filter(h => h.kind === "sound");
+    saved.innerHTML = "";
+    L.forEach(h => {
+      const sp = document.createElement("div");
+      sp.textContent = `saved sound: ${mmss(h.t)}  ${h.lo}-${h.hi} Hz`;
+      const x = document.createElement("button"); x.textContent = "x";
+      x.onclick = () => { picks[s.title] = pickList(picks[s.title]).filter(q => q !== h);
+        if (!picks[s.title].length) delete picks[s.title]; save(); showSaved(); };
+      sp.appendChild(x); saved.appendChild(sp);
+    });
+  };
+  w._showSaved = showSaved;
+  if (s.spec) {
+    const sb = document.createElement("button"); sb.className = "play"; sb.textContent = "🎛 Spectrogram";
+    sb.onclick = () => specPanel(w, s, sb, showSaved); row.appendChild(sb);
+  }
+  showSaved();
+  return w;
+}
+function openPanel(w, s, c, btn, showSaved) {
+  document.querySelectorAll(".panel").forEach(p => p.remove()); cancelAnimationFrame(raf);
+  const p = document.createElement("div"); p.className = "panel";
+  p.innerHTML = `<label>Low cut<input type="range" min="0" max="1000" class="lo"><span class="lov"></span></label>
+    <label>High cut<input type="range" min="0" max="1000" class="hi"><span class="hiv"></span></label>
+    <canvas></canvas><div class="row"><button class="pp">Pause</button><button class="iso">Isolated</button><button class="sv">Save this sound</button></div>`;
+  w.appendChild(p);
+  let lo = c.lo, hi = c.hi, iso = true;
+  const upd = () => { p.querySelector(".lov").textContent = lo + " Hz"; p.querySelector(".hiv").textContent = hi + " Hz"; setBand(lo, hi, iso); };
+  p.querySelector(".lo").value = INV(lo); p.querySelector(".hi").value = INV(hi);
+  p.querySelector(".lo").oninput = e => { lo = Math.min(LOG(+e.target.value), hi - 50); upd(); };
+  p.querySelector(".hi").oninput = e => { hi = Math.max(LOG(+e.target.value), lo + 50); upd(); };
+  p.querySelector(".iso").onclick = e => { iso = !iso; e.target.textContent = iso ? "Isolated" : "Full (unfiltered)"; upd(); };
+  p.querySelector(".pp").onclick = e => { au.paused ? au.play() : au.pause(); e.target.textContent = au.paused ? "Play" : "Pause"; };
+  p.querySelector(".sv").onclick = () => {
+    picks[s.title] = pickList(picks[s.title]).concat([{ t: c.t, len: c.len, lo, hi, kind: "sound", picked: true }]);
+    save(); showSaved(); p.querySelector(".sv").textContent = "Saved";
+  };
+  const ch = audio(); actx.resume(); upd();
+  document.querySelectorAll(".play.on").forEach(b => b.classList.remove("on"));
+  au.src = c.clip; au.loop = true; au.play(); btn.classList.add("on");
+  const cv = p.querySelector("canvas"), g = cv.getContext("2d"), data = new Uint8Array(ch.an.frequencyBinCount);
+  const draw = () => {
+    const W = cv.width = cv.clientWidth * (devicePixelRatio || 1), H = cv.height = 90 * (devicePixelRatio || 1);
+    ch.an.getByteFrequencyData(data); g.clearRect(0, 0, W, H);
+    const nyq = actx.sampleRate / 2, X = hz => Math.log(hz / 40) / Math.log(16000 / 40) * W;
+    g.fillStyle = "#6aa9d6";
+    for (let x = 0; x < W; x += 2) {
+      const hz = 40 * Math.pow(16000 / 40, x / W), i = Math.min(data.length - 1, Math.round(hz / nyq * data.length));
+      const v = data[i] / 255 * H; g.fillRect(x, H - v, 2, v);
+    }
+    g.fillStyle = "#f0a54a33"; g.fillRect(X(lo), 0, X(hi) - X(lo), H);
+    g.strokeStyle = "#f0a54a"; [lo, hi].forEach(f => { g.beginPath(); g.moveTo(X(f), 0); g.lineTo(X(f), H); g.stroke(); });
+    raf = requestAnimationFrame(draw);
+  };
+  draw();
+}
+// spectrogram selector: drag a box (time x frequency) around the sound; it loops, filtered to the box
+function specPanel(w, s, btn, showSaved, focus, keepPlaying) {
+  document.querySelectorAll(".panel").forEach(p => p.remove()); cancelAnimationFrame(raf);
+  const sp = s.spec;
+  let px = 8, H = 280;                      // continuous zoom: px per second, picture height
+  const p = document.createElement("div"); p.className = "panel";
+  p.innerHTML = `<div class="sinfo">Left-drag: box the sound. Wheel: zoom. Shift+wheel: time only, Ctrl+wheel: pitch only. Right- or middle-drag: pan. (Higher = higher pitch.)</div>
+    <div class="zoom"><button class="zo">-</button><button class="zi">+</button><button class="tall">Tall</button><span class="zl"></span></div>
+    <div class="spec"><img><canvas></canvas></div>
+    <div class="sinfo sel">No selection yet</div>
+    <div class="row"><button class="pp">Pause</button><button class="iso">Isolated</button><button class="sv">Save this sound</button></div>`;
+  w.appendChild(p);
+  const img = p.querySelector("img"), cv = p.querySelector("canvas"), g = cv.getContext("2d"), box = p.querySelector(".spec");
+  let sel = null, drag = null, iso = true;
+  const pxs = () => px;
+  const fOf = y => sp.fhi * Math.pow(sp.flo / sp.fhi, y / H), tOf = x => x / pxs();
+  const yOf = f => H * Math.log(f / sp.fhi) / Math.log(sp.flo / sp.fhi), xOf = t => t * pxs();
+  // zoom: the detailed picture (48 px/s, 600 pitch rows) from 16 px/s up; the selection is kept in time/pitch
+  const layout = keepT => {
+    const W = Math.round(sp.dur * pxs()), src = px > 10 && sp.png_hd ? sp.png_hd : sp.png;
+    if (!img.src.endsWith(src)) img.src = src;
+    img.style.width = W + "px"; img.style.height = H + "px";
+    cv.width = W; cv.height = H; cv.style.width = W + "px"; cv.style.height = H + "px";
+    p.querySelector(".zl").textContent = `${Math.round(pxs())} px/s${px > 10 && !sp.png_hd ? " (detail still building)" : ""}  height ${H}px`;
+    if (keepT != null) box.scrollLeft = Math.max(0, xOf(keepT) - box.clientWidth / 2);
+  };
+  // wheel = zoom time around the pointer, ctrl+wheel = zoom pitch; right/middle-drag = pan
+  box.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = box.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    const k = Math.exp(-e.deltaY * 0.0015);
+    // plain wheel: both ways together (keeps it square, user 2026-11-24); shift: time only; ctrl: pitch only
+    const t = tOf(box.scrollLeft + mx), fy = (box.scrollTop + my) / H;
+    if (!e.ctrlKey) px = Math.max(4, Math.min(96, px * k));
+    if (!e.shiftKey) H = Math.max(280, Math.min(2400, H * k));
+    layout();
+    box.scrollLeft = xOf(t) - mx;
+    box.scrollTop = fy * H - my;
+  }, { passive: false });
+  let pan = null;
+  box.addEventListener("contextmenu", e => e.preventDefault());
+  box.addEventListener("pointerdown", e => {
+    if (e.button !== 1 && e.button !== 2) return;
+    e.preventDefault(); e.stopPropagation();
+    pan = [e.clientX, e.clientY, box.scrollLeft, box.scrollTop]; box.setPointerCapture(e.pointerId); box.style.cursor = "grabbing";
+  }, true);
+  box.addEventListener("pointermove", e => { if (!pan) return; box.scrollLeft = pan[2] - (e.clientX - pan[0]); box.scrollTop = pan[3] - (e.clientY - pan[1]); });
+  box.addEventListener("pointerup", () => { pan = null; box.style.cursor = ""; });
+  const centreT = () => sel ? (sel.t0 + sel.t1) / 2 : tOf(box.scrollLeft + box.clientWidth / 2);
+  p.querySelector(".zi").onclick = () => { const t = centreT(); px = Math.min(96, px * 1.6); layout(t); };
+  p.querySelector(".zo").onclick = () => { const t = centreT(); px = Math.max(4, px / 1.6); layout(t); };
+  p.querySelector(".tall").onclick = e => { H = H === 280 ? 600 : 280; e.target.textContent = H === 280 ? "Tall" : "Short"; layout(centreT()); };
+  img.onload = () => { layout(); };
+  layout();
+  if (focus) {                                       // zoom so the hook section fills ~40 % of the view, centred
+    const vw = box.clientWidth || 600;
+    px = Math.max(4, Math.min(96, vw * 0.4 / Math.max(0.5, focus.t1 - focus.t0)));
+    layout((focus.t0 + focus.t1) / 2);
+  }
+  redraw0();
+  function redraw0() { redraw(); }
+  function redraw() {
+    g.clearRect(0, 0, cv.width, cv.height);
+    for (let t = 0; t < sp.dur; t += 30) { g.fillStyle = "#ffffff55"; g.fillRect(xOf(t), H - 14, 1, 14);
+      g.fillStyle = "#ffffffaa"; g.font = "11px monospace"; g.fillText(mmss(t), xOf(t) + 3, H - 3); }
+    [1000, 4000, 10000].forEach(f => { g.fillStyle = "#ffffff66"; g.font = "11px monospace"; g.fillText(f >= 1000 ? f / 1000 + "k" : f, 2, yOf(f) - 2);
+      g.fillStyle = "#ffffff22"; g.fillRect(0, yOf(f), cv.width, 1); });
+    if (focus) { g.setLineDash([6, 4]); g.strokeStyle = "#ffffffaa"; g.lineWidth = 1;
+      g.strokeRect(xOf(focus.t0), 1, xOf(focus.t1) - xOf(focus.t0), H - 2); g.setLineDash([]); }
+    if (sel) { const x0 = xOf(sel.t0), x1 = xOf(sel.t1), y0 = yOf(sel.hi), y1 = yOf(sel.lo);
+      g.strokeStyle = "#f0a54a"; g.lineWidth = 2; g.strokeRect(x0, y0, x1 - x0, y1 - y0); g.fillStyle = "#f0a54a22"; g.fillRect(x0, y0, x1 - x0, y1 - y0);
+      if (!au.paused && au.src.includes(sp.audio)) { g.fillStyle = "#fff"; g.fillRect(xOf(au.currentTime), y0, 2, y1 - y0); } }
+    raf = requestAnimationFrame(redraw);
+  }
+  const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, Math.max(0, Math.min(H, e.clientY - r.top))]; };
+  cv.addEventListener("pointerdown", e => { if (e.button !== 0) return; cv.setPointerCapture(e.pointerId); drag = pos(e); });
+  cv.addEventListener("pointermove", e => { if (!drag) return; const q = pos(e);
+    sel = { t0: tOf(Math.min(drag[0], q[0])), t1: tOf(Math.max(drag[0], q[0])), hi: fOf(Math.min(drag[1], q[1])), lo: fOf(Math.max(drag[1], q[1])) }; });
+  cv.addEventListener("pointerup", e => { drag = null; if (!sel || sel.t1 - sel.t0 < 0.3) { sel = null; return; }
+    sel.t0 = Math.round(sel.t0 * 100) / 100; sel.t1 = Math.round(sel.t1 * 100) / 100; sel.lo = Math.round(sel.lo); sel.hi = Math.round(sel.hi);
+    p.querySelector(".sel").textContent = `${mmss(sel.t0)} - ${mmss(sel.t1)}  (${(sel.t1 - sel.t0).toFixed(1)} s)   ${sel.lo} - ${sel.hi} Hz`;
+    playSel(); });
+  const playSel = () => { audio(); actx.resume(); setBand(sel.lo, sel.hi, iso);
+    if (!au.src.includes(sp.audio)) au.src = sp.audio;
+    au.loop = false; au.currentTime = sel.t0; au.play(); btn.classList.add("on"); };
+  au.ontimeupdate = () => { if (sel && au.src.includes(sp.audio) && au.currentTime >= sel.t1) au.currentTime = sel.t0; };
+  p.querySelector(".iso").onclick = e => { iso = !iso; e.target.textContent = iso ? "Isolated" : "Full (unfiltered)"; if (sel) setBand(sel.lo, sel.hi, iso); };
+  p.querySelector(".pp").onclick = e => { au.paused ? au.play() : au.pause(); e.target.textContent = au.paused ? "Play" : "Pause"; };
+  p.querySelector(".sv").onclick = () => { if (!sel) return;
+    picks[s.title] = pickList(picks[s.title]).concat([{ t: sel.t0, len: Math.round((sel.t1 - sel.t0) * 100) / 100, lo: sel.lo, hi: sel.hi, kind: "sound", picked: true }]);
+    save(); showSaved(); p.querySelector(".sv").textContent = "Saved - draw another or close"; };
+}
+// hook clips play unfiltered (and once) whenever no sound panel is open
+au.addEventListener("play", () => { if (!document.querySelector(".panel")) { au.loop = false; au.ontimeupdate = null; if (chain) setBand(10, 22000, false); } });
+const mark = () => { $("todo").classList.toggle("on", onlyTodo); $("all").classList.toggle("on", !onlyTodo);
+  try { localStorage.setItem("hooks_all", onlyTodo ? "0" : "1"); } catch (e) {} };
+$("todo").onclick = () => { onlyTodo = true; mark(); render(); };
+$("all").onclick = () => { onlyTodo = false; mark(); render(); };
+$("q").oninput = e => { query = e.target.value.trim().toLowerCase(); render(); };
+mark();
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+    if not lib.tracks:
+        print(f"No playable audio found in {music or '(no playlist yet)'} - idle until one is added")
+        if _idle(args, cfg, lock):
+            _restart(args)
+        return

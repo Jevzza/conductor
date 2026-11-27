@@ -1,0 +1,26 @@
+# your data: music analysis, ratings, renders, recordings, trained models
+cache/
+review/*
+!review/*.html
+recordings/
+loop_demos/
+config.json
+playlists.txt
+profiles/*.local.json
+
+# environments / downloaded models
+.venv*/
+.hf/
+hf/
+torch/
+
+# build output (packaging/build_dist.py)
+build/
+*.zip
+
+# editor / python leftovers
+__pycache__/
+*.pyc
+*.bak*
+.vscode/
+.idea/
