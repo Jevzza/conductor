@@ -816,8 +816,20 @@ def _gen_set(by, j, A, B, t_land, dbA, champ, mode, n_gen, rng, k_set, rev):
     yard = [m for m in ok if m not in gen_ok]
     if len(gen_ok) < 3 or not yard:
         return None
-    pick = gen_ok[:2] + [rng.choice(gen_ok[2:])] + [yard[0]]
-    role = ["critic top", "critic 2nd", "wildcard", "yardstick"]
+    # 2026-11-27: the plan model (learns from the recipe: which layer plays when) gets its own option, so
+    # every set measures it against the critic. Falls back to the critic's 2nd until a model is trained.
+    from . import planmodel
+    ctx = {"locked": float(mode == "beat"), "bridge": float(mode == "bridge"), "glide": float(routes.STRETCH == "glide")}
+    ps = {m: planmodel.score(cands[m], plans[m] if routes.gen_parse(routes.as_route(cands[m])["steps"][0]["style"]) else None, ctx)
+          for m in gen_ok}
+    if all(v is not None for v in ps.values()):
+        plan_top = max(gen_ok, key=lambda m: ps[m])
+        crit = [m for m in gen_ok if m != plan_top]
+        pick = [plan_top, crit[0], rng.choice(crit[1:]), yard[0]]
+        role = ["plan top", "critic top", "wildcard", "yardstick"]
+    else:
+        pick = gen_ok[:2] + [rng.choice(gen_ok[2:])] + [yard[0]]
+        role = ["critic top", "critic 2nd", "wildcard", "yardstick"]
     order = list(range(4)); rng.shuffle(order)
     q = {"id": qid, "kind": "how", "mode": mode, "gen": True, "context": j["context"], "options": [], "clips": [],
          "seams": [], "plans": [], "critic": [], "role": [], "landing": [B.title, round(t_land, 2)],
@@ -829,8 +841,10 @@ def _gen_set(by, j, A, B, t_land, dbA, champ, mode, n_gen, rng, k_set, rev):
         os.replace(os.path.join(rev, rendered[m][0]), os.path.join(rev, dst))
         q["options"].append(cands[m]); q["clips"].append(dst); q["seams"].append(rendered[m][1])
         q["plans"].append(plans[m]); q["critic"].append(round(sc[m], 4)); q["role"].append(role[o])
-        if o == 0:
+        if role[o] == "critic top" or (o == 0 and role[0] == "critic top"):
             q["model_pick"] = k
+        if role[o] == "plan top":
+            q["plan_pick"] = k
     for c, _ in rendered:
         f = os.path.join(rev, c)
         if os.path.exists(f) and os.path.basename(c).startswith(qid + "_p"):
@@ -1095,6 +1109,11 @@ def nightly(n: int = 15) -> dict:
     report = {"answers": len(_answers())}
     report["song_model"] = joinmodel.train(lib)
     report["taste_model"] = train_taste(lib)
+    try:                                         # 2026-11-27: the plan model (recipe -> your pick), used live and in sets
+        from . import planmodel
+        report["plan_model"] = planmodel.train()
+    except Exception as e:
+        report["plan_model"] = f"failed: {e}"
     # 2026-11-20: your picks also train a taste layer on the critic, which then chooses each set's favourite
     if os.path.exists(CRITIC_PY) and os.path.exists(CRITIC_PT):
         try:

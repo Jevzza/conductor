@@ -597,11 +597,30 @@ class StateDirector:
         names, w = zip(*self.LAYERED)
         style = self.UNLOCKED if unlocked else f"{self._lrng.choices(names, w)[0]}{self.LAYER_BARS}"
         t_land = float(s0["t_in"])
+        # 2026-11-27: the plan model (learned from your picks and tweaks: which layer plays when) chooses the
+        # recipe among the hand-made ones and a dozen freshly generated ones; the dice above if it isn't trained
+        try:
+            from . import ab, planmodel
+            pool = ([self.UNLOCKED] if unlocked else [f"{n}{self.LAYER_BARS}" for n in names])
+            pool += [ab._gen_sample(self._lrng, not unlocked) for _ in range(12)]
+            drop = routes.lands_on_drop(B, t_land)
+            ctx = {"locked": float(not unlocked), "bridge": float(unlocked), "glide": float(routes.STRETCH == "glide")}
+            scored = []
+            for st in dict.fromkeys(pool):
+                routes.register_gen(st)
+                v = planmodel.score({"a": cur.title, "steps": [{"b": B.title, "style": st}]}, routes.layer_plan(st, drop), ctx)
+                if v is not None:
+                    scored.append((v, st))
+            if scored:
+                v, style = max(scored)
+                print(f"    plan model: {style} ({v:+.2f}, best of {len(scored)} recipes)", flush=True)
+        except Exception as e:
+            print("    plan model skipped:", e, flush=True)
         t_in = routes.lead_start(B, t_land, style)
         at = cur.next_bar(pos + 4.0)               # time to load stems and build the blend
         if t_in is None or t_in < 0 or at - pos > 7.0:
             return None
-        blend = routes._bars_len(B, t_in, self.LAYER_BARS)
+        blend = routes._bars_len(B, t_in, routes.LEAD_STYLES.get(style, self.LAYER_BARS))
         why = None
         if unlocked:
             pass
