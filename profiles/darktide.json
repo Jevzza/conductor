@@ -1,0 +1,495 @@
+{
+ "game": "darktide",
+ "protocol": 1,
+ "_comment": "Maps Darktide's Wwise music states to game-agnostic musical intent. This file plus the Lua bridge are the only Darktide-specific parts of Conductor.",
+ "scenes": [
+  {
+   "name": "intro",
+   "when": {
+    "music_game_state": [
+     "mission_intro"
+    ]
+   },
+   "energy": [
+    0.0,
+    0.35
+   ],
+   "base_energy": 0.15,
+   "prefer": [
+    "calm",
+    "release"
+   ],
+   "family": "mission",
+   "_note": "Mission intro: calm, and the same family as the mission so the calm song carries into the start of the mission."
+  },
+  {
+   "name": "cinematic",
+   "when": {
+    "music_game_state": [
+     "cinematic",
+     "mission_outro",
+     "credits"
+    ]
+   },
+   "energy": [
+    0.0,
+    0.6
+   ],
+   "base_energy": 0.3,
+   "family": "lobby"
+  },
+  {
+   "name": "victory",
+   "when": {
+    "music_game_state": [
+     "victory",
+     "game_score_win"
+    ]
+   },
+   "energy": [
+    0.4,
+    1.0
+   ],
+   "base_energy": 0.6,
+   "prefer": [
+    "release",
+    "peak"
+   ]
+  },
+  {
+   "name": "defeat",
+   "when": {
+    "music_game_state": [
+     "defeat",
+     "game_score_lose"
+    ]
+   },
+   "energy": [
+    0.0,
+    0.45
+   ],
+   "base_energy": 0.2,
+   "prefer": [
+    "calm",
+    "release"
+   ]
+  },
+  {
+   "name": "loadout",
+   "when": {
+    "music_game_state": [
+     "loadout",
+     "loadout_ready"
+    ]
+   },
+   "energy": [
+    0.15,
+    0.45
+   ],
+   "base_energy": 0.35,
+   "prefer": [
+    "build"
+   ],
+   "family": "loadout",
+   "_note": "Loadout screen: building, but it never reaches intensity.",
+   "after": {
+    "families": [
+     "lobby",
+     "loadout"
+    ],
+    "when": {
+     "music_game_state": [
+      "loading",
+      "mission_loading"
+     ]
+    },
+    "_note": "leaving the hub, the game shows 'loading' for a moment before the loadout screen"
+   }
+  },
+  {
+   "name": "loading",
+   "when": {
+    "music_game_state": [
+     "loading",
+     "mission_loading",
+     "game_start",
+     "mission_start",
+     "mission_briefing"
+    ]
+   },
+   "energy": [
+    0.3,
+    0.8
+   ],
+   "base_energy": 0.6,
+   "prefer": [
+    "build"
+   ],
+   "family": "loading",
+   "_note": "Loading screen / Valkyrie: builds again, more intense than the loadout."
+  },
+  {
+   "name": "menu",
+   "when": {
+    "music_game_state": [
+     "title",
+     "main_menu",
+     "character_creation",
+     "mission_board",
+     "mission_ready",
+     "game_score"
+    ]
+   },
+   "energy": [
+    0.0,
+    0.45
+   ],
+   "base_energy": 0.2,
+   "family": "lobby"
+  },
+  {
+   "name": "hub",
+   "when": {
+    "music_zone": [
+     "hub"
+    ]
+   },
+   "energy": [
+    0.0,
+    0.5
+   ],
+   "base_energy": 0.25,
+   "family": "lobby"
+  },
+  {
+   "name": "mission",
+   "when": {
+    "music_game_state": [
+     "mission"
+    ]
+   },
+   "energy": [
+    0.0,
+    1.0
+   ],
+   "base_energy": 0.2,
+   "dynamic": true
+  }
+ ],
+ "energy_rules": [
+  {
+   "group": "music_combat",
+   "mode": "floor",
+   "values": {
+    "normal": 0.62,
+    "horde_low": 0.72,
+    "horde_high": 0.85,
+    "boss": 0.95
+   }
+  },
+  {
+   "group": "music_objective",
+   "mode": "floor",
+   "values": {
+    "collect_event": 0.6,
+    "control_event": 0.65,
+    "demolition_event": 0.65,
+    "fortification_event": 0.7,
+    "hacking_event": 0.6,
+    "kill_event": 0.75,
+    "escape_event": 0.85,
+    "last_man_standing": 0.8,
+    "prologue_combat": 0.6
+   }
+  },
+  {
+   "group": "event_intensity",
+   "mode": "add",
+   "values": {
+    "low": 0.02,
+    "high": 0.05
+   }
+  },
+  {
+   "group": "minion_aggro_intensity",
+   "mode": "add",
+   "values": {
+    "low": 0.02,
+    "medium": 0.04,
+    "high": 0.06
+   }
+  },
+  {
+   "group": "suppression_state",
+   "mode": "add",
+   "values": {
+    "low": 0.01,
+    "high": 0.03
+   }
+  }
+ ],
+ "param_rules": [
+  {
+   "name": "minion_counter_global",
+   "mode": "add",
+   "range": [
+    0,
+    100
+   ],
+   "max": 0.03
+  },
+  {
+   "name": "player_attack_intensity",
+   "mode": "add",
+   "range": [
+    0,
+    100
+   ],
+   "max": 0.03
+  }
+ ],
+ "tension_rules": [
+  {
+   "group": "music_objective_progression",
+   "values": {
+    "one": 0.35,
+    "two": 0.65,
+    "three": 0.95
+   }
+  },
+  {
+   "group": "music_objective",
+   "values": {
+    "escape_event": 0.8,
+    "last_man_standing": 0.9
+   }
+  },
+  {
+   "group": "player_state",
+   "values": {
+    "knocked_down": 0.7,
+    "netted": 0.6,
+    "pounced": 0.6,
+    "ledge_hanging": 0.6,
+    "last_wound": 0.5
+   }
+  }
+ ],
+ "urgent": [
+  {
+   "group": "music_combat",
+   "values": [
+    "boss",
+    "horde_high"
+   ]
+  },
+  {
+   "group": "music_objective",
+   "values": [
+    "escape_event",
+    "last_man_standing"
+   ]
+  },
+  {
+   "group": "music_game_state",
+   "values": [
+    "victory",
+    "defeat"
+   ]
+  }
+ ],
+ "combat_when": [
+  {
+   "group": "music_combat",
+   "values": [
+    "normal",
+    "horde_low",
+    "horde_high",
+    "boss"
+   ]
+  },
+  {
+   "group": "music_objective",
+   "values": [
+    "kill_event",
+    "escape_event",
+    "last_man_standing",
+    "fortification_event"
+   ]
+  }
+ ],
+ "combat_hold": 3,
+ "combat_sustain": [],
+ "pre_combat": {
+  "group": "minion_aggro_intensity",
+  "values": [
+   "low",
+   "medium",
+   "high"
+  ],
+  "window": 8,
+  "_note": "aggro rising while calm = a fight within ~2-8 s (91%). Counts as combat for `window` seconds so the switch can land on the old song's drop; it does not keep a fight alive (that made one 'fight' last a whole mission).",
+  "params": {
+   "aggro_near": 3,
+   "horde_near": 1,
+   "boss_near": 1,
+   "enemies_8m": 2,
+   "enemies_20m": 8
+  }
+ },
+ "tiers": {
+  "_note": "game intensity 0 calm, 1 skirmish, 2 horde, 3 peak; the max of all matching rules (combat only)",
+  "states": [
+   {
+    "group": "music_combat",
+    "values": {
+     "normal": 1,
+     "horde_low": 2,
+     "horde_high": 2,
+     "boss": 3
+    }
+   },
+   {
+    "group": "music_objective",
+    "values": {
+     "fortification_event": 1,
+     "kill_event": 3,
+     "escape_event": 3,
+     "last_man_standing": 3
+    }
+   },
+   {
+    "group": "event_intensity",
+    "values": {
+     "high": 2
+    }
+   }
+  ],
+  "params": [
+   {
+    "name": "aggro_near",
+    "at": [
+     [
+      12,
+      2
+     ],
+     [
+      24,
+      3
+     ]
+    ]
+   }
+  ]
+ },
+ "directions": {
+  "_note": "Gameplay music direction, picked in the mod options. 'conductor' = this profile as is (anticipation, tiers from enemy counts, holds). 'native' = exactly the game's own music states, one to one, with no inference of our own; only the music is ours.",
+  "native": {
+   "combat_when": [
+    {
+     "group": "music_combat",
+     "values": [
+      "normal",
+      "horde_low",
+      "horde_high",
+      "boss"
+     ]
+    },
+    {
+     "group": "music_objective",
+     "values": [
+      "kill_event",
+      "escape_event",
+      "last_man_standing",
+      "fortification_event"
+     ]
+    }
+   ],
+   "combat_sustain": [],
+   "combat_hold": 0,
+   "pre_combat": null,
+   "energy_rules": [
+    {
+     "group": "music_combat",
+     "mode": "floor",
+     "values": {
+      "normal": 0.6,
+      "horde_low": 0.72,
+      "horde_high": 0.85,
+      "boss": 0.95
+     }
+    },
+    {
+     "group": "music_objective",
+     "mode": "floor",
+     "values": {
+      "collect_event": 0.6,
+      "control_event": 0.65,
+      "demolition_event": 0.65,
+      "fortification_event": 0.7,
+      "hacking_event": 0.6,
+      "kill_event": 0.75,
+      "escape_event": 0.85,
+      "last_man_standing": 0.8,
+      "prologue_combat": 0.6
+     }
+    }
+   ],
+   "param_rules": [],
+   "tiers": {
+    "states": [
+     {
+      "group": "music_combat",
+      "values": {
+       "normal": 1,
+       "horde_low": 2,
+       "horde_high": 3,
+       "boss": 3
+      }
+     },
+     {
+      "group": "music_objective",
+      "values": {
+       "fortification_event": 1,
+       "kill_event": 2,
+       "escape_event": 3,
+       "last_man_standing": 3
+      }
+     }
+    ],
+    "params": []
+   },
+   "tuning": {
+    "rise_dwell": 0.5,
+    "fall_dwell": 0.5,
+    "energy_rise_tau": 0.5,
+    "energy_fall_tau": 0.5,
+    "escalate_gap": 15.0,
+    "deescalate_after": 8.0,
+    "min_hold": 10.0
+   }
+  }
+ },
+ "local": {
+  "_note": "The game's horde flag is global (a horde within 80 m + 10 enemies anywhere) and stays on long after the fight around you ends. 'Hot' = enemies fighting YOU: aggro within 30 m, your attacks, melee lock. A horde tier needs a hot moment in the last cool_after s; nothing hot for lull_after s = a lull even if the game still says combat.",
+  "hot_states": {
+   "minion_aggro_intensity": [
+    "medium",
+    "high"
+   ]
+  },
+  "big_states": {
+   "minion_aggro_intensity": [
+    "high"
+   ]
+  },
+  "hot_params": {
+   "player_attack_intensity": 20,
+   "player_locked_in_melee": 1,
+   "aggro_near": 6,
+   "enemies_8m": 3
+  },
+  "cool_after": 6,
+  "lull_after": 6,
+  "down_hold": 4
+ }
+}

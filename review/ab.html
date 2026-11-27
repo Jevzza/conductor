@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Join Trainer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800;900&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root { --bg:#0d1116; --panel:#161c24; --ink:#e6ebf1; --muted:#93a0b1; --line:#2a323e; --accent:#f0a54a; --good:#5fbf6a; --bad:#e0605a;
+  --c0:#6aa9d6; --c1:#c58be0; --c2:#5fc4a8; --c3:#e8b04f;
+  --display:"Archivo","Segoe UI",system-ui,sans-serif; --body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  --pulse: 0; --hue: var(--c0); color-scheme: dark; }
+* { box-sizing: border-box } [hidden] { display: none !important }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 var(--body); min-height:100vh; overflow-x:hidden }
+body::before { content:""; position:fixed; inset:-20%; z-index:-1; pointer-events:none;
+  background: radial-gradient(40% 35% at 30% 20%, color-mix(in srgb, var(--hue) calc(6% + var(--pulse) * 22%), transparent), transparent 70%),
+              radial-gradient(35% 30% at 75% 80%, color-mix(in srgb, var(--accent) calc(3% + var(--pulse) * 10%), transparent), transparent 70%) }
+.wrap { max-width: 1400px; margin: 0 auto; padding: 18px 16px 40px; display: grid; grid-template-columns: 1fr 290px; gap: 14px; align-items: start }
+@media (max-width: 1080px) { .wrap { grid-template-columns: 1fr } }
+.main { display: grid; gap: 14px; min-width: 0 }
+header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap }
+h1 { font: 900 26px var(--display); margin: 0 } h1 span { color: var(--accent) }
+.sub { color: var(--muted); font-size: 13.5px }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 12px; position: relative }
+.ctx { font: 800 20px var(--display); display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
+.ctx .st { padding: 2px 10px; border-radius: 999px; font: 700 14px var(--display); background: #ffffff10 }
+.ctx .arrow { color: var(--accent); animation: nudge 1.4s ease-in-out infinite } @keyframes nudge { 50% { transform: translateX(4px) } }
+.st.calm { color:#7fd1c2 } .st.fight { color:#f0c060 } .st.horde { color:#f08a4a } .st.boss { color:#ff5a6a; text-shadow: 0 0 12px #ff5a6a66 }
+.progress { height: 8px; background: #ffffff10; border-radius: 4px; overflow: hidden }
+.progress div { height: 100%; background: linear-gradient(90deg, var(--accent), #ffd27a); width: 0; transition: width .5s cubic-bezier(.2,.9,.3,1.3); box-shadow: 0 0 12px var(--accent) }
+.grid4 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px } @media (max-width: 720px) { .grid4 { grid-template-columns: 1fr } }
+.pl { border: 2px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; cursor: pointer; align-content: start; transition: border-color .15s, box-shadow .15s, transform .15s, opacity .2s; position: relative; overflow: hidden }
+.pl:hover { transform: translateY(-1px) }
+.pl.playing { border-color: var(--c); box-shadow: 0 0 calc(10px + var(--pulse) * 30px) color-mix(in srgb, var(--c) 45%, transparent) }
+.pl.best { border-color: var(--good); box-shadow: 0 0 24px #5fbf6a55; background: #5fbf6a0d }
+.pl.worst { border-color: var(--bad); background: #e0605a0d; opacity: .8 }
+.pl.heard::after { content: "✓ heard"; position: absolute; top: 12px; right: 12px; font: 11px var(--mono); color: var(--muted) }
+.pl h2 { margin: 0; font: 900 22px var(--display); color: var(--c); display: flex; align-items: center; gap: 8px }
+.eq { display: inline-flex; gap: 2px; align-items: end; height: 16px; opacity: 0 } .pl.playing .eq { opacity: 1 }
+.eq i { width: 3px; background: var(--c); border-radius: 1px; height: 4px }
+canvas.lanes { width: 100%; display: block; border-radius: 6px; background: #ffffff05 }
+canvas.wave { width: 100%; height: 64px; display: block; border-radius: 6px; background: #ffffff08; cursor: crosshair }
+.row { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; color: var(--muted); align-items: center; min-height: 30px }
+.verdict { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px }
+button { font: inherit; padding: 9px 8px; border-radius: 9px; border: 1px solid var(--line); background: #222a35; color: var(--ink); cursor: pointer; transition: transform .08s, border-color .15s, background .15s }
+button:hover { border-color: var(--accent) } button:active { transform: scale(.96) }
+.verdict .bfine.on { background: #5fbf6a1f; border-color: var(--good); animation: pop .25s } .pl.fine:not(.best) { border-color: #5fbf6a88 }
+.verdict .bbest.on { background: #5fbf6a33; border-color: var(--good); animation: pop .25s } .verdict .bworst.on { background: #e0605a33; border-color: var(--bad); animation: pop .25s }
+kbd { font: 12px var(--mono); color: var(--muted); margin-left: 4px }
+.hop { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 7px; padding: 2px 6px } .hop .nm { color: var(--ink) }
+.hop button, .wrong { padding: 2px 7px; font-size: 13px; background: transparent }
+.hop button.on.g { background: #5fbf6a33; border-color: var(--good); animation: pop .25s } .hop button.on.b { background: #e0605a33; border-color: var(--bad); animation: pop .25s }
+.wrong.on { background: #e0605a33; border-color: var(--bad); color: var(--ink); animation: pop .25s }
+@keyframes pop { 40% { transform: scale(1.2) } }
+.bottom { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px } @media (max-width: 720px) { .bottom { grid-template-columns: 1fr } }
+#next { font-weight: 700; background: #f0a54a22; border-color: var(--accent) } #next:disabled { opacity: .4; cursor: default; background: #222a35; border-color: var(--line) }
+.card.shake { animation: shake .35s } @keyframes shake { 20%,60% { transform: translateX(-6px) } 40%,80% { transform: translateX(6px) } }
+.toast { position: fixed; left: 50%; top: 22%; transform: translate(-50%, 0) scale(.6); font: 900 44px var(--display); pointer-events: none; opacity: 0; z-index: 10; text-shadow: 0 4px 30px #000 }
+.toast.go { animation: toast .9s ease-out } @keyframes toast { 15% { opacity: 1; transform: translate(-50%, 0) scale(1.08) } 70% { opacity: 1; transform: translate(-50%, -10px) scale(1) } 100% { opacity: 0; transform: translate(-50%, -40px) scale(.95) } }
+#fx { position: fixed; inset: 0; pointer-events: none; z-index: 9 }
+.side { display: grid; gap: 14px; position: sticky; top: 14px }
+.side h3 { margin: 0; font: 800 15px var(--display); letter-spacing: .02em; text-transform: uppercase; color: var(--muted) }
+.big { font: 900 34px var(--display); line-height: 1 }
+.statrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px }
+.streak { font: 800 15px var(--display); color: var(--accent); min-height: 22px }
+.lb { display: grid; gap: 7px }
+.lb .r { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 13px }
+.lb .bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: #ffffff10; overflow: hidden }
+.lb .bar div { height: 100%; border-radius: 3px; transition: width .6s cubic-bezier(.2,.9,.3,1.2) }
+.lb .n { font: 12px var(--mono); color: var(--muted) }
+.done { text-align: center; padding: 30px 10px } .stat { font: 13px var(--mono); color: var(--muted) }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px }
+label.chain { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted) }
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div class="toast" id="toast"></div>
+<div class="wrap">
+  <div class="main">
+    <header><h1>Join <span>Trainer</span></h1><div class="sub">Four ways the music could change at one moment. Pick the best and the worst. Mark any others that would still be fine in game.</div></header>
+    <div class="progress"><div id="bar"></div></div>
+    <div class="card" id="card">
+      <div class="stat" id="count"></div>
+      <div class="ctx" id="ctx"></div>
+      <div class="grid4" id="grid"></div>
+      <div class="bottom">
+        <button id="next" disabled>Next ⏎</button>
+        <button id="allbad">All bad<kbd>0</kbd></button>
+        <button id="allgood">All fine<kbd>9</kbd></button>
+      </div>
+      <div class="row" style="justify-content:space-between">
+        <label class="sub" style="display:flex;align-items:center;gap:10px;flex:1;min-width:220px">Volume <input type="range" id="vol" min="0" max="1" step="0.01" style="flex:1;accent-color:var(--accent)"> <span id="volv" class="stat"></span></label>
+        <label class="chain"><input type="checkbox" id="chain" checked> Play all four in a row <kbd>C</kbd></label>
+      </div>
+      <details><summary>Keys &amp; how to rate</summary><div class="sub">
+        Play: <b>Q W E R</b> (or click a card / its waveform to jump). Best: <b>1 2 3 4</b>. Worst: <b>A S D F</b>. Also fine: <b>5 6 7 8</b>. Next: <b>Enter</b>. All bad <b>0</b>, all fine <b>9</b>. Space pauses, Backspace undoes.<br>
+        Each clip: 4 s before the change, then the change. Orange lines = where the music switches; blue = no splice, the song plays on into its own drop. Optional: 👍/👎 single changes, and flag a part that's the wrong music for the game moment.</div></details>
+    </div>
+    <div class="card done" id="done" hidden><div class="ctx" style="justify-content:center">All done 🎉</div><div class="sub" id="donesub" style="text-align:center"></div></div>
+  </div>
+  <aside class="side">
+    <div class="card">
+      <h3>This session</h3>
+      <div class="statrow">
+        <div><div class="big" id="sPicks">0</div><div class="sub">sets</div></div>
+        <div><div class="big" id="sLeft">0</div><div class="sub" id="sEta">left</div></div>
+      </div>
+      <div class="streak" id="streak"></div>
+      <div class="stat" id="sAll"></div>
+    </div>
+    <div class="card">
+      <h3>Style leaderboard</h3>
+      <div class="sub" style="margin-top:-6px">👍 share from all your ratings</div>
+      <div class="lb" id="lb"></div>
+    </div>
+  </aside>
+</div>
+<audio id="au" preload="auto"></audio>
+<script>
+const au = document.getElementById("au"), $ = id => document.getElementById(id);
+const L = ["A", "B", "C", "D"], PLAY = "qwer", BEST = "1234", WORST = "asdf";
+const RECIPE = { melfirst: "Melody first", rhyfirst: "Rhythm first", drumbridge: "Drum bridge", basscarry: "Bass carry", hookover: "Hook over", breakdown: "Breakdown bridge" };
+function recipeName(st) { const g = /^gen(\d)_/.exec(st || ""); if (g) return `AI blend (${g[1]} bars)`; const m = /^(melfirst|rhyfirst|drumbridge|basscarry|hookover|breakdown)(4|8)(h?)$/.exec(st || "");
+  return m ? `${RECIPE[m[1]]} (${m[2]} bars${m[3] ? ", hooks" : ""})` : null; }
+const NAMES = { swap4d: "Drop swap, drums+melody (4 bars)", swap8d: "Drop swap, drums+melody (8 bars)", swap4: "Drop swap (4 bars)", swap8: "Drop swap (8 bars)", layer4: "Layered blend (4 bars)", layer8: "Layered blend (8 bars)", layer4d: "Layered + hooks (4 bars)", strip4s: "Strip + snap-back (4 bars)", hook4: "Hook in (4 bars)", hookout: "Hook trails out", tease2: "Tease (2 bars)", tease4: "Tease (4 bars)", strip2: "Strip + riser (2 bars)", strip4: "Strip + riser (4 bars)", fill1: "Drum fill", natural: "Song's own drop", dj: "DJ swap", djverb: "Reverb wash", djblend: "Overhang", mix: "DJ mix", xfade1: "1-bar blend", xfade2: "2-bar blend",
+  xfade4: "4-bar blend", echo: "Echo out", cut: "Hard cut", punch: "Punch", filter: "Filter sweep", riser: "Riser", drop: "Silent drop", auto: "Auto" };
+const STATE = { Calm: "calm", Fight: "fight", Horde: "horde", Boss: "boss" };
+let quads = [], raw = [], i = 0, playing = -1, st = null, session = { n: 0, t0: Date.now(), streak: 0 }, waves = {}, chainFrom = null;
+
+const partsOf = r => { const steps = r.steps || [], one = steps.length < 2;
+  return [{ part: 0, label: "Before", song: r.a, t: r.t_out - 1 }].concat(steps.map((s, k) => ({ part: k + 1, label: one ? "After" : `After ${k + 1}`, song: s.b, t: s.t_in + 0.5 }))); };
+
+// ── audio analysis ──
+let actx, an, freq;
+function ensureAudio() {
+  if (actx) { actx.resume(); return; }
+  try { actx = new (window.AudioContext || window.webkitAudioContext)(); const src = actx.createMediaElementSource(au);
+    an = actx.createAnalyser(); an.fftSize = 256; an.smoothingTimeConstant = 0.7; src.connect(an); an.connect(actx.destination); freq = new Uint8Array(an.frequencyBinCount);
+  } catch (e) { actx = null; }
+}
+async function loadWave(url) {
+  if (url in waves) return; waves[url] = null;
+  try { const ctx = new OfflineAudioContext(1, 2, 22050); const buf = await ctx.decodeAudioData(await (await fetch(url)).arrayBuffer());
+    const d = buf.getChannelData(0), N = 360, step = Math.floor(d.length / N), out = new Float32Array(N);
+    for (let k = 0; k < N; k++) { let m = 0; for (let j = k * step; j < (k + 1) * step; j += 4) m = Math.max(m, Math.abs(d[j])); out[k] = m; }
+    waves[url] = { peaks: out, dur: buf.duration }; } catch (e) {}
+}
+
+async function load() {
+  quads = await (await fetch("ab/quads.json?" + Date.now())).json();
+  try { raw = await (await fetch("/ab_answers")).json(); } catch (e) { raw = []; }
+  const done = new Set(raw.filter(a => a.kind === "quad").map(a => a.quad.id));
+  quads = quads.filter(q => !done.has(q.id));
+  board(); show();
+}
+// 2026-11-25: sets render one at a time - pick up new ones as they land, no reload needed
+setInterval(async () => {
+  try {
+    const all = await (await fetch("ab/quads.json?" + Date.now())).json();
+    const have = new Set(quads.map(q => q.id)), done = new Set(raw.filter(a => a.kind === "quad").map(a => a.quad.id));
+    const add = all.filter(q => !have.has(q.id) && !done.has(q.id));
+    if (!add.length) return;
+    const atEnd = i >= quads.length;
+    quads.push(...add);
+    if (atEnd) show(); else { $("count").textContent = `Set ${i + 1} of ${quads.length}`; $("bar").style.width = `${100 * i / quads.length}%`; }
+  } catch (e) {}
+}, 8000);
+function ctxHtml(c) { const [f, t] = c.split(" → "); return `<span class="st ${STATE[f] || ""}">${f}</span><span class="arrow">→</span><span class="st ${STATE[t] || ""}">${t}</span>`; }
+
+function show() {
+  $("bar").style.width = `${quads.length ? 100 * i / quads.length : 100}%`; stats();
+  if (i >= quads.length) { $("card").hidden = true; $("done").hidden = false; au.pause();
+    $("donesub").textContent = `${raw.length} answers saved in total. New sets appear here by themselves as they finish rendering.`;
+    confetti(innerWidth / 2, innerHeight / 3, ["#f0a54a", "#6aa9d6", "#c58be0", "#5fbf6a"], 160); return; }
+  $("card").hidden = false; $("done").hidden = true;
+  const q = quads[i];
+  st = { best: null, worst: null, fine: new Set(), hops: {}, wrong: {}, heard: new Set() };
+  $("count").textContent = `Set ${i + 1} of ${quads.length}${q.synthetic ? "  ·  made-up jump" : ""}`;
+  $("ctx").innerHTML = ctxHtml(q.context);
+  const g = $("grid"); g.innerHTML = "";
+  q.options.forEach((r, k) => {
+    loadWave(q.clips[k]);
+    const d = document.createElement("div"); d.className = "pl"; d.id = "pl" + k; d.style.setProperty("--c", `var(--c${k})`);
+    d.innerHTML = `<h2>${L[k]} <span class="eq">${"<i></i>".repeat(5)}</span><kbd>${PLAY[k].toUpperCase()}</kbd></h2>
+      <canvas class="wave" id="cv${k}"></canvas><canvas class="lanes" id="ln${k}"></canvas><div class="row hops"></div><div class="row wrongs">Wrong music:</div>
+      <div class="verdict"><button class="bbest">★ Best<kbd>${BEST[k]}</kbd></button><button class="bfine">✓ Fine<kbd>${FINE[k]}</kbd></button><button class="bworst">✕ Worst<kbd>${WORST[k].toUpperCase()}</kbd></button></div>`;
+    d.addEventListener("click", e => { if (!e.target.closest("button") && e.target.tagName !== "CANVAS") play(k, null, true); });
+    d.querySelector("canvas").addEventListener("click", e => { e.stopPropagation(); const rc = e.currentTarget.getBoundingClientRect(), wv = waves[q.clips[k]];
+      play(k, (e.clientX - rc.left) / rc.width * ((wv && wv.dur) || au.duration || 12), true); });
+    d.querySelector(".bbest").onclick = e => { e.stopPropagation(); mark("best", k); };
+    d.querySelector(".bworst").onclick = e => { e.stopPropagation(); mark("worst", k); };
+    d.querySelector(".bfine").onclick = e => { e.stopPropagation(); toggleFine(k); };
+    const steps = r.steps || [], seams = q.seams[k] || [], hb = d.querySelector(".hops");
+    steps.forEach((s, j) => {
+      const h = document.createElement("span"); h.className = "hop";
+      if (seams.length < 2) { h.innerHTML = `<span class="nm">${recipeName(s.style) || NAMES[s.style] || s.style}</span>`; hb.appendChild(h); return; }
+      h.innerHTML = `${j + 1}. <span class="nm">${recipeName(s.style) || NAMES[s.style] || s.style}</span> <button class="g">👍</button><button class="b">👎</button>`;
+      h.querySelectorAll("button").forEach(bt => bt.addEventListener("click", e => { e.stopPropagation();
+        const v = bt.classList.contains("g") ? 1 : -1, m = st.hops[k] = st.hops[k] || [];
+        m[j] = m[j] === v ? 0 : v; h.querySelector(".g").classList.toggle("on", m[j] === 1); h.querySelector(".b").classList.toggle("on", m[j] === -1);
+        if (m[j]) { const rc = bt.getBoundingClientRect(); confetti(rc.x + rc.width / 2, rc.y, [v > 0 ? "#5fbf6a" : "#e0605a"], 14); } }));
+      hb.appendChild(h);
+    });
+    const wb = d.querySelector(".wrongs");
+    partsOf(r).forEach(part => { const bt = document.createElement("button"); bt.className = "wrong"; bt.textContent = part.label; bt.title = `${part.song} @ ${Math.round(part.t)} s`;
+      bt.onclick = e => { e.stopPropagation(); const w = st.wrong[k] = st.wrong[k] || []; const at = w.findIndex(x => x.part === part.part);
+        at < 0 ? w.push(part) : w.splice(at, 1); bt.classList.toggle("on", at < 0); };
+      wb.appendChild(bt); });
+    g.appendChild(d);
+  });
+  q.options.forEach((r, k) => drawLanes(k, q));
+  refresh();
+  chainFrom = $("chain").checked ? 0 : null;
+  play(0);
+}
+// what is playing when: one lane per layer (A = the song you're leaving, B = the one you're going to)
+function drawLanes(k, q) {
+  const cv = $("ln" + k), plan = (q.plans || [])[k];
+  if (!cv || q !== quads[i]) return;
+  if (!plan || !plan.length) { cv.style.display = "none"; return; }
+  const wv = waves[q.clips[k]], dur = wv && wv.dur;
+  if (!dur) { setTimeout(() => drawLanes(k, q), 250); return; }
+  const sm = q.seams[k] || [], t0 = sm[0], t1 = sm[sm.length - 1];
+  const RH = 15, dpr = devicePixelRatio || 1, W = cv.clientWidth || 300, H = plan.length * RH;
+  cv.style.height = H + "px"; cv.width = W * dpr; cv.height = H * dpr;
+  const c = cv.getContext("2d"); c.scale(dpr, dpr);
+  const X = t => t / dur * W;
+  plan.forEach((ln, r) => {
+    const y0 = r * RH, base = y0 + RH - 1, amp = RH - 3;
+    const col = /hook/.test(ln.lane) ? "#c58be0" : ln.lane[0] === "A" ? "#f0a54a" : "#6aa9d6";
+    // height = planned gain x how much the layer is really playing (act, per half bar) - silence shows empty
+    const gain = x => { const p = ln.pts; if (x <= p[0][0]) return p[0][1];
+      for (let j = 1; j < p.length; j++) if (x <= p[j][0]) { const [x0, g0] = p[j - 1], [x1, g1] = p[j];
+        return x1 > x0 ? g0 + (g1 - g0) * (x - x0) / (x1 - x0) : g1; } return p[p.length - 1][1]; };
+    const act = x => ln.act && ln.act.length && x >= 0 && x < 1 ? ln.act[Math.min(ln.act.length - 1, Math.floor(x * ln.act.length))] : 1;
+    const N = 160; c.beginPath(); c.moveTo(0, base);
+    for (let j = 0; j <= N; j++) { const px = j / N * W, t = px / W * dur, x = (t - t0) / Math.max(1e-6, t1 - t0);
+      c.lineTo(px, base - gain(Math.max(0, Math.min(1, x))) * act(x) * amp); }
+    c.lineTo(W, base); c.closePath();
+    c.fillStyle = col; c.globalAlpha = .5; c.fill(); c.globalAlpha = 1;
+    c.fillStyle = "#e6ebf1"; c.font = "10px ui-monospace, monospace"; c.fillText(ln.lane, 4, y0 + RH - 4);
+  });
+  c.strokeStyle = "#ffffff55"; c.setLineDash([3, 3]);
+  [t0, t1].forEach(t => { c.beginPath(); c.moveTo(X(t), 0); c.lineTo(X(t), H); c.stroke(); });
+}
+function refresh() {
+  for (let k = 0; k < 4; k++) { const d = $("pl" + k); if (!d) continue;
+    d.classList.toggle("best", st.best === k); d.classList.toggle("worst", st.worst === k); d.classList.toggle("heard", st.heard.has(k));
+    d.classList.toggle("fine", isFine(k)); d.querySelector(".bfine").classList.toggle("on", isFine(k));
+    d.querySelector(".bbest").classList.toggle("on", st.best === k); d.querySelector(".bworst").classList.toggle("on", st.worst === k); }
+  $("next").disabled = !ready();
+}
+const FINE = ["5", "6", "7", "8"];
+const isFine = k => st.best === k || st.fine.has(k);
+function toggleFine(k) { if (st.best === k) return; st.fine.has(k) ? st.fine.delete(k) : st.fine.add(k); refresh();
+  if (st.fine.has(k)) { const rc = $("pl" + k).getBoundingClientRect(); confetti(rc.x + rc.width / 2, rc.y + 20, ["#5fbf6a"], 10); } }
+// a worst is needed unless every other option is fine (then it is just a favourite)
+function ready() { return st.best != null && (st.worst != null || [0, 1, 2, 3].every(isFine)); }
+function mark(which, k) {
+  const other = which === "best" ? "worst" : "best";
+  st[which] = st[which] === k ? null : k; if (st[other] === k) st[other] = null;
+  refresh();
+  if (st[which] === k) { const rc = $("pl" + k).getBoundingClientRect(); confetti(rc.x + rc.width / 2, rc.y + 20, [which === "best" ? "#5fbf6a" : "#e0605a"], which === "best" ? 30 : 12); }
+}
+function play(k, at, manual) {
+  const q = quads[i]; if (!q) return; ensureAudio();
+  if (manual) chainFrom = null;                    // you took over: stop playing through the set
+  const src = q.clips[k]; if (!au.src.endsWith(src)) au.src = src;
+  au.currentTime = at != null ? at : 0; au.play().catch(() => {}); playing = k;
+  for (let j = 0; j < 4; j++) { const d = $("pl" + j); if (d) d.classList.toggle("playing", j === k); }
+  document.documentElement.style.setProperty("--hue", `var(--c${k})`);
+}
+au.addEventListener("ended", () => {
+  if (playing >= 0 && st) { st.heard.add(playing); refresh(); }
+  if (chainFrom != null && playing < 3) play(playing + 1, null, false); else chainFrom = null;
+});
+
+// ── drawing ──
+let level = 0;
+function draw() {
+  if (an && !au.paused) { an.getByteFrequencyData(freq); let bass = 0; for (let k = 1; k < 8; k++) bass += freq[k]; bass /= 7 * 255; level = Math.max(level * 0.88, bass);
+    const d = $("pl" + playing); if (d) [...d.querySelectorAll(".eq i")].forEach((b, k) => b.style.height = `${3 + freq[2 + k * 9] / 255 * 13}px`);
+  } else level *= 0.92;
+  document.documentElement.style.setProperty("--pulse", Math.max(0, (level - 0.35) * 1.6).toFixed(3));
+  const q = quads[i];
+  if (q) for (let k = 0; k < 4; k++) {
+    const c = $("cv" + k); if (!c) continue;
+    const r = devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+    if (c.width !== W * r) { c.width = W * r; c.height = H * r; }
+    const g = c.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, W, H);
+    const wv = waves[q.clips[k]], seams = q.seams[k] || [4], dur = (wv && wv.dur) || Math.max(...seams) + 6;
+    const pos = playing === k ? au.currentTime / dur : -1, col = getComputedStyle(document.documentElement).getPropertyValue(`--c${k}`).trim();
+    if (wv) { const N = wv.peaks.length, bw = W / N;
+      for (let j = 0; j < N; j++) { const h = Math.max(1, wv.peaks[j] * (H - 8)), near = playing === k && Math.abs(j / N - pos) < 0.012, b = near ? 1 + level * 0.5 : 1;
+        g.fillStyle = j / N < pos ? col : "#ffffff30"; g.fillRect(j * bw, (H - h * b) / 2, Math.max(1, bw - 0.6), h * b); } }
+    const steps = q.options[k].steps || [];
+    seams.forEach((s, j) => { const nat = (steps[j] || {}).style === "natural", x = s / dur * W;
+      g.fillStyle = nat ? "#6aa9d6" : "#f0a54a"; g.fillRect(x - 1, 0, 2, H); g.fillStyle = "#cfd7e2"; g.font = "600 11px IBM Plex Sans";
+      g.fillText(seams.length > 1 ? `${j + 1}${nat ? " drop" : ""}` : "change", x + 4, 12); });
+    if (pos >= 0) { g.fillStyle = "#fff"; g.shadowColor = col; g.shadowBlur = 10; g.fillRect(pos * W - 1, 0, 2, H); g.shadowBlur = 0; }
+  }
+  fxStep(); requestAnimationFrame(draw);
+}
+const fx = $("fx"), fg = fx.getContext("2d"); let parts = [];
+function confetti(x, y, colors, n) { for (let k = 0; k < n; k++) parts.push({ x, y, vx: (Math.random() - .5) * 9, vy: -Math.random() * 9 - 2, life: 1, c: colors[k % colors.length], s: 3 + Math.random() * 4, r: Math.random() * 6 }); }
+function fxStep() {
+  if (fx.width !== innerWidth || fx.height !== innerHeight) { fx.width = innerWidth; fx.height = innerHeight; }
+  fg.clearRect(0, 0, fx.width, fx.height); parts = parts.filter(q => q.life > 0);
+  for (const q of parts) { q.x += q.vx; q.y += q.vy; q.vy += 0.32; q.vx *= 0.985; q.life -= 0.016; q.r += 0.2;
+    fg.save(); fg.globalAlpha = Math.max(0, q.life); fg.fillStyle = q.c; fg.translate(q.x, q.y); fg.rotate(q.r); fg.fillRect(-q.s / 2, -q.s / 2, q.s, q.s * .6); fg.restore(); }
+}
+function toast(text, color) { const t = $("toast"); t.textContent = text; t.style.color = color; t.classList.remove("go"); void t.offsetWidth; t.classList.add("go"); }
+
+// ── stats + leaderboard ──
+function stats() {
+  const left = Math.max(0, quads.length - i), mins = (Date.now() - session.t0) / 60000, rate = session.n / Math.max(mins, .5);
+  $("sPicks").textContent = session.n; $("sLeft").textContent = left;
+  $("sEta").textContent = session.n >= 2 && left ? `left · ~${Math.ceil(left / rate)} min` : "left";
+  const cmp = raw.reduce((s, a) => s + (a.kind === "quad" ? (a.best != null ? 5 : 2) : 1), 0);
+  $("sAll").textContent = `${cmp} comparisons all-time${session.n >= 2 ? ` · ${(rate * 5).toFixed(1)}/min now` : ""}`;
+  $("streak").textContent = session.streak >= 3 ? `${"🔥".repeat(Math.min(5, Math.floor(session.streak / 3)))} ${session.streak} in a row` : "";
+}
+function tally() {
+  const t = {}, add = (s, v) => { if (!s || s === "auto") return; t[s] = t[s] || { g: 0, n: 0 }; t[s].n++; if (v > 0) t[s].g++; };
+  const route = (r, hm, v) => { const steps = (r && r.steps) || []; steps.forEach((s, k) => { if (hm && hm[k]) add(s.style, hm[k]); else if (v && steps.length === 1) add(s.style, v); }); };
+  for (const a of raw) {
+    if (a.kind === "quad") { a.quad.options.forEach((r, k) => {
+        const v = a.all === "good" ? 1 : a.all === "bad" ? -1 : a.best === k ? 1 : a.worst === k ? -1 : 0;
+        route(r, (a.hops || {})[k], v); }); continue; }
+    const p = a.pair; if (!p) continue;
+    for (const w of ["a", "b"]) route(p[w], (a.hops || {})[w],
+      a.choice === "both_good" ? 1 : a.choice === "both_bad" ? -1 : (a.choice === "a" || a.choice === "b") ? (a.choice === w ? 1 : -1) : 0);
+  }
+  return Object.entries(t).filter(([, v]) => v.n >= 3).map(([k, v]) => ({ k, p: v.g / v.n, n: v.n })).sort((x, y) => y.p - x.p);
+}
+function board() {
+  const lb = $("lb"); lb.innerHTML = "";
+  tally().forEach(r => { const d = document.createElement("div"); d.className = "r";
+    d.innerHTML = `<span>${NAMES[r.k] || r.k}</span><span class="n">${Math.round(r.p * 100)}% · ${r.n}</span><div class="bar"><div style="width:0;background:hsl(${Math.round(r.p * 120)} 60% 55%)"></div></div>`;
+    lb.appendChild(d); requestAnimationFrame(() => requestAnimationFrame(() => d.querySelector(".bar div").style.width = `${Math.max(3, r.p * 100)}%`)); });
+}
+
+async function submit(all) {
+  const q = quads[i]; if (!q) return;
+  if (!all && !ready()) return;
+  raw.push({ kind: "quad", quad: q, best: all ? null : st.best, worst: all ? null : st.worst, all: all || null,
+    fine: all ? null : [0, 1, 2, 3].filter(isFine), hops: st.hops, wrong: st.wrong, at: new Date().toISOString() });
+  try { await fetch("/ab_answers", { method: "POST", body: JSON.stringify(raw) }); } catch (e) {}
+  session.n++;
+  if (all === "bad") { session.streak = 0; $("card").classList.remove("shake"); void $("card").offsetWidth; $("card").classList.add("shake"); toast("All bad", "#e0605a"); }
+  else { session.streak++; const k = all ? 0 : st.best, rc = $("pl" + k).getBoundingClientRect();
+    toast(all ? "All fine" : `${L[st.best]} wins`, all ? "#5fbf6a" : getComputedStyle(document.documentElement).getPropertyValue(`--c${st.best}`));
+    confetti(rc.x + rc.width / 2, rc.y + 30, ["#5fbf6a", "#f0a54a", "#ffffff"], 50); }
+  if (session.n % 5 === 0) setTimeout(() => { toast(`${session.n} sets! (${session.n * 5} comparisons)`, "#f0a54a"); confetti(innerWidth / 2, innerHeight / 2, ["#f0a54a", "#6aa9d6", "#c58be0", "#5fbf6a"], 120); }, 600);
+  board(); i++; show();
+}
+function undo() { if (!i) return; raw.pop(); fetch("/ab_answers", { method: "POST", body: JSON.stringify(raw) }); session.n = Math.max(0, session.n - 1); session.streak = 0; i--; board(); show(); }
+$("next").onclick = () => submit(); $("allbad").onclick = () => submit("bad"); $("allgood").onclick = () => submit("good");
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" && e.target.type === "range") return;
+  const k = e.key.toLowerCase();
+  if (PLAY.includes(k) && k.length === 1) play(PLAY.indexOf(k), null, true);
+  else if (BEST.includes(k) && k.length === 1) mark("best", BEST.indexOf(k));
+  else if (WORST.includes(k) && k.length === 1) mark("worst", WORST.indexOf(k));
+  else if (FINE.includes(k) && k.length === 1) toggleFine(FINE.indexOf(k));
+  else if (k === "enter") { e.preventDefault(); submit(); }
+  else if (k === "0") submit("bad"); else if (k === "9") submit("good");
+  else if (k === "c") { $("chain").checked = !$("chain").checked; }
+  else if (k === " ") { e.preventDefault(); au.paused ? au.play() : au.pause(); }
+  else if (k === "backspace") { e.preventDefault(); undo(); }
+});
+{ let v = 0.7; try { const s = localStorage.getItem("ab_vol"); if (s != null) v = +s; } catch (e) {}
+  const set = x => { au.volume = x; $("vol").value = x; $("volv").textContent = Math.round(x * 100) + "%"; try { localStorage.setItem("ab_vol", x); } catch (e) {} };
+  $("vol").addEventListener("input", e => set(+e.target.value)); set(v); }
+setInterval(stats, 15000);
+load(); draw();
+</script>
+</body>
+</html>
