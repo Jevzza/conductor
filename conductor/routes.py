@@ -314,14 +314,16 @@ def _callout(track, kind: str, max_s: float) -> np.ndarray | None:
     return None
 
 
-def _hold_level(y: np.ndarray, ref: np.ndarray, max_db: float = 6.0, under_db: float = 1.5) -> np.ndarray:
-    g = _hold_gain(y, ref, max_db, under_db)
+def _hold_level(y: np.ndarray, ref: np.ndarray, max_db: float = 6.0, under_db: float = 1.5,
+                ref_after: np.ndarray | None = None) -> np.ndarray:
+    g = _hold_gain(y, ref, max_db, under_db, ref_after=ref_after)
     if g is None:
         return y
     return (0.98 * np.tanh(y * g / 0.98)).astype(np.float32)            # soft limit
 
 
-def _hold_gain(y: np.ndarray, ref: np.ndarray, max_db: float = 6.0, under_db: float = 1.5):
+def _hold_gain(y: np.ndarray, ref: np.ndarray, max_db: float = 6.0, under_db: float = 1.5,
+               ref_after: np.ndarray | None = None, over_db: float = 1.5, cut_db: float = 9.0):
     """Make-up gain: keep a lead-in as loud as the music just before it (user 2026-11-24: lead-ins
     dipped 6-10 dB and vanish under a horde). Only ever lifts, follows a smoothed 200 ms loudness,
     and a soft limiter keeps the peaks under full scale."""
@@ -331,12 +333,23 @@ def _hold_gain(y: np.ndarray, ref: np.ndarray, max_db: float = 6.0, under_db: fl
     # removed the bass got lifted far too high (user 2026-11-24: "now too loud in the blend")
     _, ref_hi = _split(ref, 120.0)
     _, y_hi = _split(y, 120.0)
-    target = float(np.sqrt(np.mean(ref_hi ** 2)) + 1e-9) * 10 ** (-under_db / 20)
+    level = float(np.sqrt(np.mean(ref_hi ** 2)) + 1e-9)
     hop = int(0.05 * SR)
     win = 4 * hop
     mono = y_hi.mean(1)
     env = np.array([np.sqrt(np.mean(mono[i:i + win] ** 2)) + 1e-9 for i in range(0, len(y), hop)])
-    g = np.clip(target / env, 1.0, 10 ** (max_db / 20))
+    # user 2026-11-26: hooks/sounds on top of both songs made blends clearly LOUDER than either song. The
+    # level now aims along a line from the music before (ref) to the new song after the blend (ref_after):
+    # lifted when more than under_db below it, cut when more than over_db above it (up to cut_db).
+    if ref_after is not None and len(ref_after) >= SR // 4:
+        _, ra_hi = _split(ref_after, 120.0)
+        after = float(np.sqrt(np.mean(ra_hi ** 2)) + 1e-9)
+    else:
+        after = level
+    line = level + (after - level) * np.linspace(0, 1, len(env))
+    lo, hi = line * 10 ** (-under_db / 20), line * 10 ** (over_db / 20)
+    g = np.where(env < lo, lo / env, np.where(env > hi, hi / env, 1.0))
+    g = np.clip(g, 10 ** (-cut_db / 20), 10 ** (max_db / 20))
     k = 8                                                              # ~400 ms smoothing, no pumping
     g = np.convolve(np.pad(g, (k, k), mode="edge"), np.ones(2 * k + 1) / (2 * k + 1), mode="same")[k:-k]
     return np.interp(np.arange(len(y)), np.arange(len(g)) * hop + win / 2, g).astype(np.float32)[:, None]
@@ -1317,7 +1330,7 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
                                vg=vg, pa=P["A melody"], pb=P["B melody"], a_acc=a_acc)
         LAST_PLAN = LAST_PLAN + plan[nlanes:]                          # show them on the trainer too
         if glide:
-            g = _hold_gain(mix, buf[max(0, n - int(1.5 * SR)):])
+            g = _hold_gain(mix, buf[max(0, n - int(1.5 * SR)):], ref_after=body[m:m + int(1.5 * SR)])
             g = 1.0 if g is None else g
             if src is not None:
                 rho = np.gradient(src) * SR                             # A seconds per B second
@@ -1332,7 +1345,7 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
             body = np.concatenate([g_out, body[m:]])
             M = len(g_out)
         else:
-            mix = _hold_level(mix, buf[max(0, n - int(1.5 * SR)):])
+            mix = _hold_level(mix, buf[max(0, n - int(1.5 * SR)):], ref_after=body[m:m + int(1.5 * SR)])
             body[:m] = mix
             M = m
         seams.append(sum(len(p) for p in out) / SR)
@@ -1385,7 +1398,8 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
                 fl = _take(st if st is not None else new, t_new, n=m)
             k = min(len(fl), m)
             lead[m - k:] += fl[len(fl) - k:] * 0.9
-        lead = _hold_level(lead, buf[max(0, n - int(1.5 * SR)):])     # user 2026-11-24: lead-ins dipped 6-10 dB
+        lead = _hold_level(lead, buf[max(0, n - int(1.5 * SR)):],     # user 2026-11-24: lead-ins dipped 6-10 dB
+                           ref_after=body[m:m + int(1.5 * SR)])           # ...and never louder than where it lands
         f = int(0.02 * SR)
         lead[m - f:] *= np.cos(x(f) * np.pi / 2)                     # the old song lets go right on the landing
         body[:m] = lead
