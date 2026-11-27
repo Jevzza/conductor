@@ -1,0 +1,11 @@
+name: Idea / request
+description: A feature, a better way to blend, support for another game
+labels: [idea]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What should Conductor do, and when would it matter?
+    validations:
+      required: true
