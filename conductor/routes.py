@@ -589,10 +589,27 @@ def _tw_end(lane: str, L: int) -> float:
     return float((TWEAKS.get(lane) or {}).get("end", 0.0)) / (4 * max(1, L))
 
 
+def _tw_pts(lane: str):
+    """The envelope you drew for this lane on the trainer page, or None."""
+    d = (TWEAKS.get("plan") or {}).get(lane)
+    if not d or len(d) < 2:
+        return None
+    pts = sorted((min(1.0, max(0.0, float(x))), min(2.0, max(0.0, float(g)))) for x, g in d)
+    if pts[0][0] > 0:
+        pts = [(0.0, pts[0][1])] + pts
+    if pts[-1][0] < 1:
+        pts = pts + [(1.0, pts[-1][1])]
+    return pts
+
+
 def _tw_plan(plan: list, L: int) -> list:
     """Move each tweaked lane's last fade-out (its end) by whole beats; clamp inside the blend."""
     out = []
     for p in plan:
+        drawn = _tw_pts(p["lane"])
+        if drawn is not None:
+            out.append({**p, "pts": drawn})
+            continue
         d = _tw_end(p["lane"], L)
         pts = [tuple(x) for x in p["pts"]]
         if d and len(pts) >= 2:
@@ -720,6 +737,16 @@ def _sprinkle_sounds(mix: np.ndarray, A, B, a_ml: np.ndarray, t_new: float, m: i
         pos, n = 0, 0
         stop = min(1.0, max(0.1, 0.6 + _tw_end("B sound", L)))           # trainer tweak: end earlier / later
         src = src * _tw_gain("B sound")
+        drawn = _tw_pts("B sound")
+        if drawn is not None:
+            envd = _env(drawn, m)
+            while pos + k <= m and n < 32:
+                seg = envd[pos:pos + k]
+                if float(seg.max()) > 0.01:
+                    g = seg if vg is None else seg * vg.gate(B, c["t"], pos, k, pa, pb)
+                    mix[pos:pos + k] += src * g
+                pos += every; n += 1
+            pos = m + 1                                                        # skip the planned loop below
         while pos + k <= int(stop * m) + 1 and n < 16:
             g = 1.0 if loud else 0.6 if n == 0 else 0.75                      # first one a touch softer
             if vg is not None:                                                 # a sung sound never over singing
@@ -727,20 +754,22 @@ def _sprinkle_sounds(mix: np.ndarray, A, B, a_ml: np.ndarray, t_new: float, m: i
             mix[pos:pos + k] += src * g
             pos += every; n += 1
         v = 1.0 if loud else 0.6
-        plan.append({"lane": "B sound", "pts": [(0, 0), (0.02, v), (stop - 0.02, v), (stop, 0)]})
+        plan.append({"lane": "B sound", "pts": drawn if drawn is not None else [(0, 0), (0.02, v), (stop - 0.02, v), (stop, 0)]})
     sa = hooks.sounds(A)
     if sa:
         c = sa[0]
         src = _bandpass(a_ml, c["lo"], c["hi"])
         e = min(1.0, max(0.55, 1.0 + _tw_end("A sound", L)))
         env = np.clip((x - 0.5) * 4, 0, 1) * np.clip((e - x) * 4, 0, 1) * _tw_gain("A sound")    # as A leaves
+        if _tw_pts("A sound") is not None:
+            env = _env(_tw_pts("A sound"), m) / 0.6
         if vg is not None:                                 # A's band carries A's voice: never over B singing
             env = env * vg.gate_a_over_b(pb)
         add = _hook_level(src, mix, rel_db=-8.0) * env
         mix += add
         if a_acc is not None:
             a_acc += add
-        plan.append({"lane": "A sound", "pts": [(0, 0), (0.5, 0), (0.75, 0.6), (1, 0)]})
+        plan.append({"lane": "A sound", "pts": _tw_pts("A sound") or [(0, 0), (0.5, 0), (0.75, 0.6), (1, 0)]})
     return mix
 
 
@@ -1336,7 +1365,8 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
             on = np.flatnonzero(P["B hook"][g0:, 0] > 0.05)
             span = int(on[-1]) + 1 if len(on) else m - g0
             h *= vg.gate(B, hb["t"], g0, span, P["A melody"], P["B melody"])
-            mix[g0:] += h * (1.0 if loud else np.minimum(1.0, P["B hook"][g0:] / 0.7)) * _tw_gain("B hook")
+            hg = P["B hook"][g0:] / 0.7 if _tw_pts("B hook") else (1.0 if loud else np.minimum(1.0, P["B hook"][g0:] / 0.7))
+            mix[g0:] += h * hg * _tw_gain("B hook")
         if gap_at is not None and hb is not None:                  # B announces itself in A's gap
             g0 = int(gap_at * m)
             k = min(m - g0, int(_bars_len(B, t_new, 2) * SR))
@@ -1365,7 +1395,7 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
                 on = np.flatnonzero(P["A hook"][g0:, 0] > 0.05)
                 span = int(on[-1]) + 1 if len(on) else m - g0
                 h *= vg.gate(A, ha["t"], g0, span, P["A melody"], P["B melody"], speed=sp)
-                add = h * np.minimum(1.0, P["A hook"][g0:] / 0.5) * _tw_gain("A hook")
+                add = h * (P["A hook"][g0:] / 0.5 if _tw_pts("A hook") else np.minimum(1.0, P["A hook"][g0:] / 0.5)) * _tw_gain("A hook")
                 mix[g0:] += add
                 if a_acc is not None:
                     a_acc[g0:] += add

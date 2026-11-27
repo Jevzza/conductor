@@ -48,7 +48,10 @@ def _tweak_render(body: dict) -> dict:
             r["stretch"] = q["stretch"]
         TWEAK["n"] += 1
         clip = f"ab/clips/{qid}_p{k}_tw{TWEAK['n']}_{int(time.time())}.mp3"
-        routes.TWEAKS = {ln: {kk: float(v) for kk, v in d.items() if kk in ("db", "end")} for ln, d in tw.items()}
+        if "plan" in tw:                            # lanes drawn on the page
+            routes.TWEAKS = {"plan": {ln: [[float(x), float(g)] for x, g in pts] for ln, pts in tw["plan"].items()}}
+        else:
+            routes.TWEAKS = {ln: {kk: float(v) for kk, v in d.items() if kk in ("db", "end")} for ln, d in tw.items()}
         try:
             seams = routes.render(TWEAK["by"], r, os.path.join(ROOT, clip))
             plan = routes.LAST_PLAN

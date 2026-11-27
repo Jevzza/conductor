@@ -182,6 +182,7 @@ function show() {
   $("card").hidden = false; $("done").hidden = true;
   const q = quads[i];
   st = { best: null, worst: null, fine: new Set(), hops: {}, wrong: {}, heard: new Set(), edits: {}, orig: {} };
+  for (const kk in ED) delete ED[kk];
   $("count").textContent = `Set ${i + 1} of ${quads.length}${q.synthetic ? "  ·  made-up jump" : ""}`;
   $("ctx").innerHTML = ctxHtml(q.context);
   const g = $("grid"); g.innerHTML = "";
@@ -191,7 +192,7 @@ function show() {
     d.innerHTML = `<h2>${L[k]} <span class="eq">${"<i></i>".repeat(5)}</span><kbd>${PLAY[k].toUpperCase()}</kbd></h2>
       <canvas class="wave" id="cv${k}"></canvas><canvas class="lanes" id="ln${k}"></canvas><div class="row hops"></div><div class="row wrongs">Wrong music:</div>
       <div class="verdict"><button class="bbest">★ Best<kbd>${BEST[k]}</kbd></button><button class="bfine">✓ Fine<kbd>${FINE[k]}</kbd></button><button class="bworst">✕ Worst<kbd>${WORST[k].toUpperCase()}</kbd></button></div>
-      <div class="row"><button class="btw" title="Change a layer's volume or how long it plays, then hear it">✎ Tweak</button></div><div class="tw" hidden></div>`;
+      <div class="row"><button class="btw" title="Edit the lanes: drag points to change when and how loud each layer plays">✎ Tweak</button></div><div class="tw" hidden></div>`;
     d.addEventListener("click", e => { if (!e.target.closest("button") && e.target.tagName !== "CANVAS") play(k, null, true); });
     d.querySelector("canvas").addEventListener("click", e => { e.stopPropagation(); const rc = e.currentTarget.getBoundingClientRect(), wv = waves[q.clips[k]];
       play(k, (e.clientX - rc.left) / rc.width * ((wv && wv.dur) || au.duration || 12), true); });
@@ -227,6 +228,7 @@ function show() {
 function drawLanes(k, q) {
   const cv = $("ln" + k), plan = (q.plans || [])[k];
   if (!cv || q !== quads[i]) return;
+  if (ED[k] && ED[k].on && ED[k].q === q) { const wv0 = waves[q.clips[k]]; if (!wv0) { setTimeout(() => drawLanes(k, q), 250); return; } return drawEdit(k, q); }
   if (!plan || !plan.length) { cv.style.display = "none"; return; }
   const wv = waves[q.clips[k]], dur = wv && wv.dur;
   if (!dur) { setTimeout(() => drawLanes(k, q), 250); return; }
@@ -253,46 +255,114 @@ function drawLanes(k, q) {
   c.strokeStyle = "#ffffff55"; c.setLineDash([3, 3]);
   [t0, t1].forEach(t => { c.beginPath(); c.moveTo(X(t), 0); c.lineTo(X(t), H); c.stroke(); });
 }
-// ── Tweak: per-layer volume / end, re-rendered on the server (optional) ──
-const TW_DB = [-12, -9, -6, -3, 0, 3, 6], TW_END = [-8, -4, -2, -1, 0, 1, 2, 4, 8];
+// ── Tweak: drag the lanes themselves (optional). Hover a lane: its points show. Drag a point (time = left/right,
+// level = up/down; snaps to beats, hold Alt for free). Click a lane to add a point, double-click a point to remove it.
+// Letting go re-renders that option (~1 s); Original / Reset below.
+const ED = {}, GMAX = 1.25, ERH = 30;
+function blendBars(st) { const m = /^gen(\d)_/.exec(st || "") || /(\d+)h?$/.exec(st || ""); return m ? +m[1] : 4; }
 function tweakPanel(k) {
   const q = quads[i], d = $("pl" + k), box = d.querySelector(".tw"), bt = d.querySelector(".btw");
-  if (!box.hidden) { box.hidden = true; bt.classList.remove("on"); return; }
-  box.hidden = false; bt.classList.add("on");
+  if (ED[k] && ED[k].on) { ED[k].on = false; box.hidden = true; bt.classList.remove("on"); drawLanes(k, q); return; }
   const plan = (st.orig[k] ? st.orig[k].plan : (q.plans || [])[k]) || [];
-  const lanes = plan.map(p => p.lane).filter(l => !/ducked/.test(l));
-  const cur = (st.edits[k] && st.edits[k].tweaks) || {};
-  if (!lanes.length) { box.innerHTML = `<div class="msg">This option has no layers to tweak (not a layered blend).</div>`; return; }
-  const opt = (vals, v, f) => vals.map(x => `<option value="${x}"${x === v ? " selected" : ""}>${f(x)}</option>`).join("");
-  box.innerHTML = lanes.map(l => { const c = cur[l] || {};
-    return `<div class="ln" data-l="${l}"><span>${l}</span>
-      <select class="db" title="volume">${opt(TW_DB, c.db || 0, x => (x > 0 ? "+" : "") + x + " dB")}</select>
-      <select class="en" title="end earlier / later">${opt(TW_END, c.end || 0, x => x === 0 ? "end: as is" : (x > 0 ? "+" : "") + x + (Math.abs(x) === 1 ? " beat" : " beats"))}</select></div>`; }).join("")
-    + `<div class="act"><button class="go">▶ Render &amp; play</button><button class="og">Original</button><button class="rs">Reset</button></div><div class="msg"></div>`;
-  const msg = box.querySelector(".msg");
-  const read = () => { const t = {}; box.querySelectorAll(".ln").forEach(r => { const db = +r.querySelector(".db").value, en = +r.querySelector(".en").value;
-    if (db || en) t[r.dataset.l] = { db, end: en }; }); return t; };
-  box.querySelector(".go").onclick = async () => {
-    const tw = read();
-    if (!Object.keys(tw).length) { msg.textContent = "Nothing changed yet - pick a volume or end for a layer."; return; }
-    msg.textContent = "Rendering…"; box.querySelector(".go").disabled = true;
+  if (!plan.length) { box.hidden = false; box.innerHTML = `<div class="msg">This option isn't a layered blend - nothing to tweak.</div>`; return; }
+  if (!ED[k] || ED[k].q !== q) {
+    const lanes = plan.filter(p => !/ducked/.test(p.lane)).map(p => {
+      let pts = p.pts.map(([x, g]) => [+x, +g]).sort((a, b) => a[0] - b[0]);
+      if (pts[0][0] > 0) pts.unshift([0, pts[0][1]]); if (pts[pts.length - 1][0] < 1) pts.push([1, pts[pts.length - 1][1]]);
+      return { lane: p.lane, pts }; });
+    ED[k] = { q, lanes, dirty: new Set(), hover: -1, pip: -1, drag: null, timer: null, bars: blendBars((q.options[k].steps || [{}])[0].style) };
+  }
+  ED[k].on = true; box.hidden = false; bt.classList.add("on");
+  box.innerHTML = `<div class="msg">Drag the points on the lanes above. Click a lane to add a point, double-click one to remove it. Alt = no snapping.</div>
+    <div class="act"><button class="og">Original ⇄ tweak</button><button class="rs">Reset</button></div><div class="msg st"></div>`;
+  box.querySelector(".og").onclick = () => tweakToggle(k);
+  box.querySelector(".rs").onclick = () => tweakReset(k);
+  hookCanvas(k); drawLanes(k, q);
+}
+function edGeom(k) {                     // pixel <-> (blend fraction, gain) for option k's lanes canvas
+  const q = quads[i], cv = $("ln" + k), wv = waves[q.clips[k]], dur = (wv && wv.dur) || 12, sm = q.seams[k] || [4, 8];
+  const t0 = sm[0], t1 = sm[sm.length - 1], W = cv.clientWidth || 300;
+  return { W, dur, t0, t1, px: x => (t0 + x * (t1 - t0)) / dur * W, fx: px => (px / W * dur - t0) / Math.max(1e-6, t1 - t0),
+    py: (r, g) => r * ERH + ERH - 2 - g / GMAX * (ERH - 5), gy: (r, y) => (r * ERH + ERH - 2 - y) / (ERH - 5) * GMAX };
+}
+function drawEdit(k, q) {
+  const e = ED[k], cv = $("ln" + k), G = edGeom(k), dpr = devicePixelRatio || 1, W = G.W, H = e.lanes.length * ERH;
+  cv.style.display = ""; cv.style.height = H + "px"; cv.width = W * dpr; cv.height = H * dpr; cv.style.cursor = e.pip >= 0 ? "grab" : "crosshair";
+  const c = cv.getContext("2d"); c.scale(dpr, dpr);
+  const beats = 4 * e.bars;
+  for (let b = 0; b <= beats; b++) { const x = G.px(b / beats); c.fillStyle = b % 4 ? "#ffffff0d" : "#ffffff26"; c.fillRect(x, 0, 1, H); }
+  e.lanes.forEach((ln, r) => {
+    const col = /hook|sound/.test(ln.lane) ? "#c58be0" : ln.lane[0] === "A" ? "#f0a54a" : "#6aa9d6", hot = r === e.hover;
+    c.fillStyle = hot ? "#ffffff0a" : "transparent"; c.fillRect(0, r * ERH, W, ERH);
+    c.strokeStyle = "#ffffff14"; c.beginPath(); c.moveTo(0, G.py(r, 1)); c.lineTo(W, G.py(r, 1)); c.stroke();   // "as planned" level
+    c.beginPath(); c.moveTo(G.px(0), G.py(r, 0)); ln.pts.forEach(([x, g]) => c.lineTo(G.px(x), G.py(r, g))); c.lineTo(G.px(1), G.py(r, 0)); c.closePath();
+    c.fillStyle = col; c.globalAlpha = hot ? .7 : (e.dirty.has(ln.lane) ? .6 : .4); c.fill(); c.globalAlpha = 1;
+    c.strokeStyle = col; c.lineWidth = hot ? 2 : 1; c.beginPath(); ln.pts.forEach(([x, g], j) => j ? c.lineTo(G.px(x), G.py(r, g)) : c.moveTo(G.px(x), G.py(r, g))); c.stroke(); c.lineWidth = 1;
+    c.fillStyle = "#e6ebf1"; c.font = "11px ui-monospace, monospace"; c.fillText(ln.lane + (e.dirty.has(ln.lane) ? " ✎" : ""), 4, r * ERH + 12);
+    if (hot) ln.pts.forEach(([x, g], j) => { c.beginPath(); c.arc(G.px(x), G.py(r, g), j === e.pip ? 6 : 4, 0, 7);
+      c.fillStyle = j === e.pip ? "#ffffff" : col; c.fill(); c.strokeStyle = "#101418"; c.stroke(); });
+  });
+  c.strokeStyle = "#ffffff55"; c.setLineDash([3, 3]); [G.px(0), G.px(1)].forEach(x => { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); }); c.setLineDash([]);
+}
+function hookCanvas(k) {
+  const cv = $("ln" + k); if (cv.dataset.ed) return; cv.dataset.ed = "1";
+  const at = ev => { const rc = cv.getBoundingClientRect(); return { x: ev.clientX - rc.left, y: ev.clientY - rc.top }; };
+  const near = (e, r, p, G) => { let best = -1, bd = 9; e.lanes[r].pts.forEach(([x, g], j) => { const d = Math.hypot(G.px(x) - p.x, G.py(r, g) - p.y); if (d < bd) { bd = d; best = j; } }); return best; };
+  const snap = (e, x, free) => { if (free) return x; const n = 4 * e.bars; return Math.round(x * n) / n; };
+  const sg = (g, free) => { g = Math.max(0, Math.min(GMAX, g)); if (!free) for (const t of [0, 0.5, 1]) if (Math.abs(g - t) < 0.05) return t; return g; };
+  cv.addEventListener("click", ev => ev.stopPropagation());
+  cv.addEventListener("mousemove", ev => { const e = ED[k]; if (!e || !e.on) return; const G = edGeom(k), p = at(ev);
+    if (e.drag) { const ln = e.lanes[e.drag.r], j = e.drag.j, pts = ln.pts, free = ev.altKey;
+      const lo = j > 0 ? pts[j - 1][0] + 0.002 : 0, hi = j < pts.length - 1 ? pts[j + 1][0] - 0.002 : 1;
+      const x = (j === 0) ? 0 : (j === pts.length - 1) ? 1 : Math.max(lo, Math.min(hi, snap(e, G.fx(p.x), free)));
+      pts[j] = [x, sg(G.gy(e.drag.r, p.y), free)]; e.drag.moved = true; e.dirty.add(ln.lane);
+      tweakMsg(k, `${ln.lane}: ${pts[j][1] > 0 ? (20 * Math.log10(pts[j][1])).toFixed(1) + " dB vs planned" : "silent"} at beat ${(x * 4 * e.bars + 1).toFixed(2)}`);
+      drawLanes(k, quads[i]); return; }
+    const r = Math.max(0, Math.min(e.lanes.length - 1, Math.floor(p.y / ERH))), j = near(e, r, p, G);
+    if (r !== e.hover || j !== e.pip) { e.hover = r; e.pip = j; drawLanes(k, quads[i]); } });
+  cv.addEventListener("mouseleave", () => { const e = ED[k]; if (e && !e.drag) { e.hover = -1; e.pip = -1; drawLanes(k, quads[i]); } });
+  cv.addEventListener("mousedown", ev => { const e = ED[k]; if (!e || !e.on) return; ev.preventDefault(); ev.stopPropagation();
+    const G = edGeom(k), p = at(ev), r = Math.max(0, Math.min(e.lanes.length - 1, Math.floor(p.y / ERH)));
+    let j = near(e, r, p, G);
+    if (j < 0) { const x = G.fx(p.x); if (x <= 0 || x >= 1) return;
+      const pts = e.lanes[r].pts, nx = snap(e, x, ev.altKey); j = pts.findIndex(q => q[0] > nx); if (j < 0) j = pts.length;
+      pts.splice(j, 0, [nx, sg(G.gy(r, p.y), ev.altKey)]); e.dirty.add(e.lanes[r].lane); }
+    e.drag = { r, j, moved: false }; e.hover = r; e.pip = j; drawLanes(k, quads[i]); });
+  addEventListener("mouseup", () => { const e = ED[k]; if (!e || !e.drag) return; e.drag = null; tweakRender(k); });
+  cv.addEventListener("dblclick", ev => { const e = ED[k]; if (!e || !e.on) return; ev.stopPropagation(); const G = edGeom(k), p = at(ev);
+    const r = Math.max(0, Math.min(e.lanes.length - 1, Math.floor(p.y / ERH))), j = near(e, r, p, G), pts = e.lanes[r].pts;
+    if (j > 0 && j < pts.length - 1) { pts.splice(j, 1); e.dirty.add(e.lanes[r].lane); e.pip = -1; drawLanes(k, quads[i]); tweakRender(k); } });
+}
+function tweakMsg(k, t) { const m = $("pl" + k).querySelector(".tw .st"); if (m) m.textContent = t; }
+function tweakRender(k) {
+  const e = ED[k]; if (!e || !e.dirty.size) return;
+  clearTimeout(e.timer);
+  e.timer = setTimeout(async () => {
+    const q = quads[i], plan = {}; e.lanes.forEach(ln => { if (e.dirty.has(ln.lane)) plan[ln.lane] = ln.pts; });
+    tweakMsg(k, "Rendering…");
     try {
-      const res = await (await fetch("/ab_tweak", { method: "POST", body: JSON.stringify({ quad: q.id, k, tweaks: tw }) })).json();
+      const res = await (await fetch("/ab_tweak", { method: "POST", body: JSON.stringify({ quad: q.id, k, tweaks: { plan } }) })).json();
       if (res.error) throw new Error(res.error);
       if (!st.orig[k]) st.orig[k] = { clip: q.clips[k], seams: q.seams[k], plan: (q.plans || [])[k] };
       q.clips[k] = res.clip; q.seams[k] = res.seams; if (q.plans) q.plans[k] = res.plan;
-      st.edits[k] = { tweaks: tw, clip: res.clip };
-      await loadWave(res.clip); drawLanes(k, q); d.classList.add("tweaked");
-      msg.textContent = "Tweaked version - rate it as usual; it's saved with your answer."; play(k, Math.max(0, (res.seams[0] || 4) - 2), true);
-    } catch (e) { msg.textContent = "Couldn't render: " + e.message; }
-    box.querySelector(".go").disabled = false;
-  };
-  box.querySelector(".og").onclick = () => { const o = st.orig[k]; if (!o) { msg.textContent = "This is the original."; return; }
-    const tw = q.clips[k] !== o.clip; q.clips[k] = tw ? o.clip : st.edits[k].clip;
-    msg.textContent = tw ? "Playing the ORIGINAL (press again for your tweak)." : "Playing your TWEAK.";
-    loadWave(q.clips[k]).then(() => drawLanes(k, q)); play(k, Math.max(0, (q.seams[k][0] || 4) - 2), true); };
-  box.querySelector(".rs").onclick = () => { const o = st.orig[k]; if (o) { q.clips[k] = o.clip; q.seams[k] = o.seams; if (q.plans) q.plans[k] = o.plan; }
-    delete st.edits[k]; delete st.orig[k]; d.classList.remove("tweaked"); box.hidden = true; bt.classList.remove("on"); drawLanes(k, q); };
+      st.edits[k] = { plan, clip: res.clip };
+      await loadWave(res.clip); $("pl" + k).classList.add("tweaked"); drawLanes(k, q);
+      tweakMsg(k, "Your tweak is playing - rate as usual, it's saved with your answer.");
+      play(k, Math.max(0, (res.seams[0] || 4) - 2), true);
+    } catch (err) { tweakMsg(k, "Couldn't render: " + err.message); }
+  }, 250);
+}
+function tweakToggle(k) {
+  const q = quads[i], o = st.orig[k]; if (!o || !st.edits[k]) { tweakMsg(k, "No tweak yet - drag a point first."); return; }
+  const toOrig = q.clips[k] !== o.clip; q.clips[k] = toOrig ? o.clip : st.edits[k].clip;
+  tweakMsg(k, toOrig ? "Playing the ORIGINAL - press again for your tweak." : "Playing your TWEAK.");
+  loadWave(q.clips[k]).then(() => drawLanes(k, q)); play(k, Math.max(0, (q.seams[k][0] || 4) - 2), true);
+}
+function tweakReset(k) {
+  const q = quads[i], o = st.orig[k];
+  if (o) { q.clips[k] = o.clip; q.seams[k] = o.seams; if (q.plans) q.plans[k] = o.plan; }
+  delete st.edits[k]; delete st.orig[k]; delete ED[k];
+  const d = $("pl" + k); d.classList.remove("tweaked"); d.querySelector(".tw").hidden = true; d.querySelector(".btw").classList.remove("on"); drawLanes(k, q);
 }
 function refresh() {
   for (let k = 0; k < 4; k++) { const d = $("pl" + k); if (!d) continue;
