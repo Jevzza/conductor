@@ -1322,7 +1322,8 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
             if src is not None:
                 rho = np.gradient(src) * SR                             # A seconds per B second
                 k = int(0.25 * SR)
-                rho = np.convolve(np.pad(rho, (k, k), mode="edge"), np.ones(2 * k + 1) / (2 * k + 1), mode="valid")
+                c = np.concatenate([[0.0], np.cumsum(np.pad(rho, (k, k), mode="edge"))])
+                rho = (c[2 * k + 1:] - c[:-2 * k - 1]) / (2 * k + 1)          # running mean (fast)
             else:
                 rho = _speed_curve(m, sp, ramp=m / SR > RAMP_FROM)
             g_out = _glide(a_acc * g, (mix - a_acc) * g, m, rho, glide=src is not None)

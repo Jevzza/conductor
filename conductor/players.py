@@ -415,7 +415,8 @@ class LocalPlayer(Player):
         try:
             from . import routes, policy
             pol = policy.current() or {}
-            routes.STRETCH = pol.get("stretch", routes.STRETCH)     # the method your ratings prefer
+            from . import playlists as _pls                          # config "stretch" (e.g. "glide") wins over
+            routes.STRETCH = _pls._load().get("stretch") or pol.get("stretch", routes.STRETCH)   # your ratings' pick
             SR = self.SR
             at, t_new = float(cue.at), float(cue.start)
             if cur.loop is not None or at * SR <= cur.pos + 0.05 * SR:
