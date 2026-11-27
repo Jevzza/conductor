@@ -337,22 +337,33 @@ function hookCanvas(k) {
 }
 function tweakMsg(k, t) { const m = $("pl" + k).querySelector(".tw .st"); if (m) m.textContent = t; }
 function tweakRender(k) {
+  // one render at a time, only of your latest edit: waits until you've paused (~0.8 s); edits made while a
+  // render is running make it start over with the newest version when that one comes back (its result is dropped)
   const e = ED[k]; if (!e || !e.dirty.size) return;
+  e.ver = (e.ver || 0) + 1;
   clearTimeout(e.timer);
-  e.timer = setTimeout(async () => {
-    const q = quads[i], plan = {}; e.lanes.forEach(ln => { if (e.dirty.has(ln.lane)) plan[ln.lane] = ln.pts; });
-    tweakMsg(k, "Rendering…");
-    try {
-      const res = await (await fetch("/ab_tweak", { method: "POST", body: JSON.stringify({ quad: q.id, k, tweaks: { plan } }) })).json();
-      if (res.error) throw new Error(res.error);
-      if (!st.orig[k]) st.orig[k] = { clip: q.clips[k], seams: q.seams[k], plan: (q.plans || [])[k] };
-      q.clips[k] = res.clip; q.seams[k] = res.seams; if (q.plans) q.plans[k] = res.plan;
-      st.edits[k] = { plan, clip: res.clip };
-      await loadWave(res.clip); $("pl" + k).classList.add("tweaked"); drawLanes(k, q);
-      tweakMsg(k, "Your tweak is playing - rate as usual, it's saved with your answer.");
-      play(k, Math.max(0, (res.seams[0] || 4) - 2), true);
-    } catch (err) { tweakMsg(k, "Couldn't render: " + err.message); }
-  }, 250);
+  tweakMsg(k, "Waiting for you to finish…");
+  e.timer = setTimeout(() => tweakGo(k), 800);
+}
+async function tweakGo(k) {
+  const e = ED[k]; if (!e) return;
+  if (e.busy) { e.again = true; return; }
+  const q = quads[i], ver = e.ver, plan = {};
+  e.lanes.forEach(ln => { if (e.dirty.has(ln.lane)) plan[ln.lane] = ln.pts.map(p => [p[0], p[1]]); });
+  e.busy = true; e.again = false; tweakMsg(k, "Rendering…");
+  try {
+    const res = await (await fetch("/ab_tweak", { method: "POST", body: JSON.stringify({ quad: q.id, k, tweaks: { plan } }) })).json();
+    if (res.error) throw new Error(res.error);
+    if (ED[k] !== e || quads[i] !== q) return;                    // moved on to another set meanwhile
+    if (e.ver !== ver) { e.again = true; return; }                // you edited again: this one's stale
+    if (!st.orig[k]) st.orig[k] = { clip: q.clips[k], seams: q.seams[k], plan: (q.plans || [])[k] };
+    q.clips[k] = res.clip; q.seams[k] = res.seams; if (q.plans) q.plans[k] = res.plan;
+    st.edits[k] = { plan, clip: res.clip };
+    await loadWave(res.clip); $("pl" + k).classList.add("tweaked"); drawLanes(k, q);
+    tweakMsg(k, "Your tweak is playing - rate as usual, it's saved with your answer.");
+    play(k, Math.max(0, (res.seams[0] || 4) - 2), true);
+  } catch (err) { tweakMsg(k, "Couldn't render: " + err.message); }
+  finally { e.busy = false; if (e.again && ED[k] === e) { e.again = false; tweakGo(k); } }
 }
 function tweakToggle(k) {
   const q = quads[i], o = st.orig[k]; if (!o || !st.edits[k]) { tweakMsg(k, "No tweak yet - drag a point first."); return; }
