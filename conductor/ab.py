@@ -781,7 +781,7 @@ def _gen_set(by, j, A, B, t_land, dbA, champ, mode, n_gen, rng, k_set, rev):
                       "steps": [{"b": B.title, "t_in": t_in, "bars": None, "style": st, "land": t_land}]})
     if ctrl is None:
         cands.append(champ)                       # bridge sets: the trees' own quick join is the yardstick
-    qid = f"g{int(time.time())}_{k_set}"
+    qid = f"g{int(time.time())}_{k_set}{os.environ.get('CONDUCTOR_WORKER', '')}"   # parallel renderers never clash
     rendered, plans = [], []
     for m, r in enumerate(cands):
         c = f"ab/clips/{qid}_p{m}.mp3"
