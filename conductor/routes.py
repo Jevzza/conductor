@@ -577,6 +577,38 @@ def _bandpass(x: np.ndarray, lo: float, hi: float) -> np.ndarray:
 
 LAST_LOCK = None
 LAST_SHIFT = 0            # samples the last join's body is longer than the new song's own span (tempo glide)
+TWEAKS: dict = {}         # trainer "Tweak": {lane: {"db": gain dB, "end": +/- beats}} for the blend being rendered
+
+
+def _tw_gain(lane: str) -> float:
+    return 10 ** (float((TWEAKS.get(lane) or {}).get("db", 0.0)) / 20)
+
+
+def _tw_end(lane: str, L: int) -> float:
+    """The lane's end moved by this many beats, as a fraction of a blend L bars long."""
+    return float((TWEAKS.get(lane) or {}).get("end", 0.0)) / (4 * max(1, L))
+
+
+def _tw_plan(plan: list, L: int) -> list:
+    """Move each tweaked lane's last fade-out (its end) by whole beats; clamp inside the blend."""
+    out = []
+    for p in plan:
+        d = _tw_end(p["lane"], L)
+        pts = [tuple(x) for x in p["pts"]]
+        if d and len(pts) >= 2:
+            on = [j for j, (_, g) in enumerate(pts) if g > 0.05]
+            if on and on[-1] + 1 < len(pts):
+                j = on[-1]
+                lo = pts[j - 1][0] + 1e-3 if j > 0 else 0.0
+                x0 = min(max(pts[j][0] + d, lo), 0.995)
+                x1 = min(max(pts[j + 1][0] + d, x0 + 1e-3), 1.0)
+                pts[j], pts[j + 1] = (x0, pts[j][1]), (x1, pts[j + 1][1])
+                pts = [q for q in pts[:j + 2]] + [q for q in pts[j + 2:] if q[0] > x1]
+            elif on and on[-1] == len(pts) - 1 and d < 0:        # plays to the end: make it stop earlier
+                x0 = max(0.0, 1.0 + d)
+                pts = [q for q in pts if q[0] < x0] + [(x0, pts[-1][1]), (min(1.0, x0 + 0.01), 0.0), (1.0, 0.0)]
+        out.append({**p, "pts": pts})
+    return out
 
 
 def _drum_lag(a: np.ndarray, b: np.ndarray, beat: float) -> float:
@@ -686,19 +718,22 @@ def _sprinkle_sounds(mix: np.ndarray, A, B, a_ml: np.ndarray, t_new: float, m: i
         src = _hook_level(src, mix[:k], rel_db=0.0 if loud else -8.0)
         every = int(bar * max(1, int(np.ceil(k / bar - 1e-6))))
         pos, n = 0, 0
-        while pos + k <= int(0.6 * m) + 1 and n < 16:
+        stop = min(1.0, max(0.1, 0.6 + _tw_end("B sound", L)))           # trainer tweak: end earlier / later
+        src = src * _tw_gain("B sound")
+        while pos + k <= int(stop * m) + 1 and n < 16:
             g = 1.0 if loud else 0.6 if n == 0 else 0.75                      # first one a touch softer
             if vg is not None:                                                 # a sung sound never over singing
                 g = g * vg.gate(B, c["t"], pos, k, pa, pb)
             mix[pos:pos + k] += src * g
             pos += every; n += 1
         v = 1.0 if loud else 0.6
-        plan.append({"lane": "B sound", "pts": [(0, 0), (0.02, v), (0.58, v), (0.6, 0)]})
+        plan.append({"lane": "B sound", "pts": [(0, 0), (0.02, v), (stop - 0.02, v), (stop, 0)]})
     sa = hooks.sounds(A)
     if sa:
         c = sa[0]
         src = _bandpass(a_ml, c["lo"], c["hi"])
-        env = np.clip((x - 0.5) * 4, 0, 1) * np.clip((1 - x) * 4, 0, 1)                     # as A leaves
+        e = min(1.0, max(0.55, 1.0 + _tw_end("A sound", L)))
+        env = np.clip((x - 0.5) * 4, 0, 1) * np.clip((e - x) * 4, 0, 1) * _tw_gain("A sound")    # as A leaves
         if vg is not None:                                 # A's band carries A's voice: never over B singing
             env = env * vg.gate_a_over_b(pb)
         add = _hook_level(src, mix, rel_db=-8.0) * env
@@ -1276,6 +1311,8 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
         loud = bool(_gp and _gp.get("loud"))                         # a loud tease: hook/sound at full level
         plan, gap_at = _adapt_plan(layer_plan(style, lands_on_drop(B, t_new + m / SR)), layers, ref_db, L, m,
                                    keep_beat=src is not None and not style.startswith("breakdown"))   # 2026-11-26: unlocked = never refill A's beat over B
+        if TWEAKS:
+            plan = _tw_plan(plan, L)
         P = {p["lane"]: _env(p["pts"], m) for p in plan}
         # user 2026-11-26: never two vocals on top of each other. Where both songs sing at once, A's
         # (outgoing) melody layer ducks out on beat-long fades; hooks/sounds that sing are gated the same way.
@@ -1285,6 +1322,8 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
         if duck is not None:
             a_ml *= duck
             plan.append({"lane": "A vocal ducked", "pts": vg.pts(1 - duck)})
+        if TWEAKS:
+            layers = {k: v * _tw_gain(k) for k, v in layers.items()}
         mix = sum(layers[k] * P[k] for k in layers)
         a_acc = sum(layers[k] * P[k] for k in layers if k.startswith("A ")).copy() if glide else None
         from . import hooks
@@ -1297,7 +1336,7 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
             on = np.flatnonzero(P["B hook"][g0:, 0] > 0.05)
             span = int(on[-1]) + 1 if len(on) else m - g0
             h *= vg.gate(B, hb["t"], g0, span, P["A melody"], P["B melody"])
-            mix[g0:] += h * (1.0 if loud else np.minimum(1.0, P["B hook"][g0:] / 0.7))
+            mix[g0:] += h * (1.0 if loud else np.minimum(1.0, P["B hook"][g0:] / 0.7)) * _tw_gain("B hook")
         if gap_at is not None and hb is not None:                  # B announces itself in A's gap
             g0 = int(gap_at * m)
             k = min(m - g0, int(_bars_len(B, t_new, 2) * SR))
@@ -1305,7 +1344,7 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
             h = _hook_level(h, mix[g0:g0 + k] + 1e-4, rel_db=-3.0)     # in a gap: the hook carries the moment
             h *= vg.gate(B, hb["t"], g0, k, P["A melody"], P["B melody"])
             fade = np.minimum(1, np.minimum(np.arange(k) / (0.05 * SR), (k - np.arange(k)) / (0.3 * SR)))
-            mix[g0:g0 + k] += h * fade.astype(np.float32)[:, None]
+            mix[g0:g0 + k] += h * fade.astype(np.float32)[:, None] * _tw_gain("B hook")
             plan.append({"lane": "B hook", "pts": [(0, 0), (gap_at, 0), (gap_at + 0.01, 0.7), (gap_at + k / m - 0.02, 0.7), (gap_at + k / m, 0)]})
         global LAST_PLAN
         LAST_PLAN = _show_actual(plan, layers, ref_db, L, m)
@@ -1326,7 +1365,7 @@ def _join(out: list, seams: list, old, t_old: float, new, t_new: float, dur: flo
                 on = np.flatnonzero(P["A hook"][g0:, 0] > 0.05)
                 span = int(on[-1]) + 1 if len(on) else m - g0
                 h *= vg.gate(A, ha["t"], g0, span, P["A melody"], P["B melody"], speed=sp)
-                add = h * np.minimum(1.0, P["A hook"][g0:] / 0.5)
+                add = h * np.minimum(1.0, P["A hook"][g0:] / 0.5) * _tw_gain("A hook")
                 mix[g0:] += add
                 if a_acc is not None:
                     a_acc[g0:] += add

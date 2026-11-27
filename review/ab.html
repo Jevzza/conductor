@@ -40,6 +40,12 @@ h1 { font: 900 26px var(--display); margin: 0 } h1 span { color: var(--accent) }
 .eq i { width: 3px; background: var(--c); border-radius: 1px; height: 4px }
 canvas.lanes { width: 100%; display: block; border-radius: 6px; background: #ffffff05 }
 canvas.wave { width: 100%; height: 64px; display: block; border-radius: 6px; background: #ffffff08; cursor: crosshair }
+.tw { border: 1px dashed var(--line); border-radius: 9px; padding: 8px; font-size: 13px; display: grid; gap: 4px }
+.tw .ln { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center }
+.tw select { font: inherit; font-size: 12px; background: #222a35; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px }
+.tw .act { display: flex; gap: 6px; margin-top: 4px } .tw .act button { padding: 5px 9px; font-size: 13px }
+.tw .msg { color: var(--muted); font-size: 12px } .btw.on { border-color: #c58be0; background: #c58be022 }
+.pl.tweaked h2::after { content: " ✎ tweaked"; font-size: 12px; color: #c58be0 }
 .row { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; color: var(--muted); align-items: center; min-height: 30px }
 .verdict { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px }
 button { font: inherit; padding: 9px 8px; border-radius: 9px; border: 1px solid var(--line); background: #222a35; color: var(--ink); cursor: pointer; transition: transform .08s, border-color .15s, background .15s }
@@ -175,7 +181,7 @@ function show() {
     confetti(innerWidth / 2, innerHeight / 3, ["#f0a54a", "#6aa9d6", "#c58be0", "#5fbf6a"], 160); return; }
   $("card").hidden = false; $("done").hidden = true;
   const q = quads[i];
-  st = { best: null, worst: null, fine: new Set(), hops: {}, wrong: {}, heard: new Set() };
+  st = { best: null, worst: null, fine: new Set(), hops: {}, wrong: {}, heard: new Set(), edits: {}, orig: {} };
   $("count").textContent = `Set ${i + 1} of ${quads.length}${q.synthetic ? "  ·  made-up jump" : ""}`;
   $("ctx").innerHTML = ctxHtml(q.context);
   const g = $("grid"); g.innerHTML = "";
@@ -184,13 +190,16 @@ function show() {
     const d = document.createElement("div"); d.className = "pl"; d.id = "pl" + k; d.style.setProperty("--c", `var(--c${k})`);
     d.innerHTML = `<h2>${L[k]} <span class="eq">${"<i></i>".repeat(5)}</span><kbd>${PLAY[k].toUpperCase()}</kbd></h2>
       <canvas class="wave" id="cv${k}"></canvas><canvas class="lanes" id="ln${k}"></canvas><div class="row hops"></div><div class="row wrongs">Wrong music:</div>
-      <div class="verdict"><button class="bbest">★ Best<kbd>${BEST[k]}</kbd></button><button class="bfine">✓ Fine<kbd>${FINE[k]}</kbd></button><button class="bworst">✕ Worst<kbd>${WORST[k].toUpperCase()}</kbd></button></div>`;
+      <div class="verdict"><button class="bbest">★ Best<kbd>${BEST[k]}</kbd></button><button class="bfine">✓ Fine<kbd>${FINE[k]}</kbd></button><button class="bworst">✕ Worst<kbd>${WORST[k].toUpperCase()}</kbd></button></div>
+      <div class="row"><button class="btw" title="Change a layer's volume or how long it plays, then hear it">✎ Tweak</button></div><div class="tw" hidden></div>`;
     d.addEventListener("click", e => { if (!e.target.closest("button") && e.target.tagName !== "CANVAS") play(k, null, true); });
     d.querySelector("canvas").addEventListener("click", e => { e.stopPropagation(); const rc = e.currentTarget.getBoundingClientRect(), wv = waves[q.clips[k]];
       play(k, (e.clientX - rc.left) / rc.width * ((wv && wv.dur) || au.duration || 12), true); });
     d.querySelector(".bbest").onclick = e => { e.stopPropagation(); mark("best", k); };
     d.querySelector(".bworst").onclick = e => { e.stopPropagation(); mark("worst", k); };
     d.querySelector(".bfine").onclick = e => { e.stopPropagation(); toggleFine(k); };
+    d.querySelector(".btw").onclick = e => { e.stopPropagation(); tweakPanel(k); };
+    d.querySelector(".tw").addEventListener("click", e => e.stopPropagation());
     const steps = r.steps || [], seams = q.seams[k] || [], hb = d.querySelector(".hops");
     steps.forEach((s, j) => {
       const h = document.createElement("span"); h.className = "hop";
@@ -243,6 +252,47 @@ function drawLanes(k, q) {
   });
   c.strokeStyle = "#ffffff55"; c.setLineDash([3, 3]);
   [t0, t1].forEach(t => { c.beginPath(); c.moveTo(X(t), 0); c.lineTo(X(t), H); c.stroke(); });
+}
+// ── Tweak: per-layer volume / end, re-rendered on the server (optional) ──
+const TW_DB = [-12, -9, -6, -3, 0, 3, 6], TW_END = [-8, -4, -2, -1, 0, 1, 2, 4, 8];
+function tweakPanel(k) {
+  const q = quads[i], d = $("pl" + k), box = d.querySelector(".tw"), bt = d.querySelector(".btw");
+  if (!box.hidden) { box.hidden = true; bt.classList.remove("on"); return; }
+  box.hidden = false; bt.classList.add("on");
+  const plan = (st.orig[k] ? st.orig[k].plan : (q.plans || [])[k]) || [];
+  const lanes = plan.map(p => p.lane).filter(l => !/ducked/.test(l));
+  const cur = (st.edits[k] && st.edits[k].tweaks) || {};
+  if (!lanes.length) { box.innerHTML = `<div class="msg">This option has no layers to tweak (not a layered blend).</div>`; return; }
+  const opt = (vals, v, f) => vals.map(x => `<option value="${x}"${x === v ? " selected" : ""}>${f(x)}</option>`).join("");
+  box.innerHTML = lanes.map(l => { const c = cur[l] || {};
+    return `<div class="ln" data-l="${l}"><span>${l}</span>
+      <select class="db" title="volume">${opt(TW_DB, c.db || 0, x => (x > 0 ? "+" : "") + x + " dB")}</select>
+      <select class="en" title="end earlier / later">${opt(TW_END, c.end || 0, x => x === 0 ? "end: as is" : (x > 0 ? "+" : "") + x + (Math.abs(x) === 1 ? " beat" : " beats"))}</select></div>`; }).join("")
+    + `<div class="act"><button class="go">▶ Render &amp; play</button><button class="og">Original</button><button class="rs">Reset</button></div><div class="msg"></div>`;
+  const msg = box.querySelector(".msg");
+  const read = () => { const t = {}; box.querySelectorAll(".ln").forEach(r => { const db = +r.querySelector(".db").value, en = +r.querySelector(".en").value;
+    if (db || en) t[r.dataset.l] = { db, end: en }; }); return t; };
+  box.querySelector(".go").onclick = async () => {
+    const tw = read();
+    if (!Object.keys(tw).length) { msg.textContent = "Nothing changed yet - pick a volume or end for a layer."; return; }
+    msg.textContent = "Rendering…"; box.querySelector(".go").disabled = true;
+    try {
+      const res = await (await fetch("/ab_tweak", { method: "POST", body: JSON.stringify({ quad: q.id, k, tweaks: tw }) })).json();
+      if (res.error) throw new Error(res.error);
+      if (!st.orig[k]) st.orig[k] = { clip: q.clips[k], seams: q.seams[k], plan: (q.plans || [])[k] };
+      q.clips[k] = res.clip; q.seams[k] = res.seams; if (q.plans) q.plans[k] = res.plan;
+      st.edits[k] = { tweaks: tw, clip: res.clip };
+      await loadWave(res.clip); drawLanes(k, q); d.classList.add("tweaked");
+      msg.textContent = "Tweaked version - rate it as usual; it's saved with your answer."; play(k, Math.max(0, (res.seams[0] || 4) - 2), true);
+    } catch (e) { msg.textContent = "Couldn't render: " + e.message; }
+    box.querySelector(".go").disabled = false;
+  };
+  box.querySelector(".og").onclick = () => { const o = st.orig[k]; if (!o) { msg.textContent = "This is the original."; return; }
+    const tw = q.clips[k] !== o.clip; q.clips[k] = tw ? o.clip : st.edits[k].clip;
+    msg.textContent = tw ? "Playing the ORIGINAL (press again for your tweak)." : "Playing your TWEAK.";
+    loadWave(q.clips[k]).then(() => drawLanes(k, q)); play(k, Math.max(0, (q.seams[k][0] || 4) - 2), true); };
+  box.querySelector(".rs").onclick = () => { const o = st.orig[k]; if (o) { q.clips[k] = o.clip; q.seams[k] = o.seams; if (q.plans) q.plans[k] = o.plan; }
+    delete st.edits[k]; delete st.orig[k]; d.classList.remove("tweaked"); box.hidden = true; bt.classList.remove("on"); drawLanes(k, q); };
 }
 function refresh() {
   for (let k = 0; k < 4; k++) { const d = $("pl" + k); if (!d) continue;
@@ -345,7 +395,8 @@ async function submit(all) {
   const q = quads[i]; if (!q) return;
   if (!all && !ready()) return;
   raw.push({ kind: "quad", quad: q, best: all ? null : st.best, worst: all ? null : st.worst, all: all || null,
-    fine: all ? null : [0, 1, 2, 3].filter(isFine), hops: st.hops, wrong: st.wrong, at: new Date().toISOString() });
+    fine: all ? null : [0, 1, 2, 3].filter(isFine), hops: st.hops, wrong: st.wrong,
+    edits: Object.keys(st.edits).length ? st.edits : undefined, at: new Date().toISOString() });
   try { await fetch("/ab_answers", { method: "POST", body: JSON.stringify(raw) }); } catch (e) {}
   session.n++;
   if (all === "bad") { session.streak = 0; $("card").classList.remove("shake"); void $("card").offsetWidth; $("card").classList.add("shake"); toast("All bad", "#e0605a"); }
@@ -358,6 +409,7 @@ async function submit(all) {
 function undo() { if (!i) return; raw.pop(); fetch("/ab_answers", { method: "POST", body: JSON.stringify(raw) }); session.n = Math.max(0, session.n - 1); session.streak = 0; i--; board(); show(); }
 $("next").onclick = () => submit(); $("allbad").onclick = () => submit("bad"); $("allgood").onclick = () => submit("good");
 document.addEventListener("keydown", e => {
+  if (e.target && /^(SELECT|INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
   if (e.target.tagName === "INPUT" && e.target.type === "range") return;
   const k = e.key.toLowerCase();
   if (PLAY.includes(k) && k.length === 1) play(PLAY.indexOf(k), null, true);

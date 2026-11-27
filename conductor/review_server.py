@@ -27,6 +27,34 @@ FILES = {"/pins": PINS, "/ab_answers": AB_ANSWERS, "/moments_answers": MOM_ANSWE
 
 
 LIVE = {"proc": None}
+TWEAK = {"by": None, "n": 0}
+import threading as _threading
+_TWEAK_LOCK = _threading.Lock()
+
+
+def _tweak_render(body: dict) -> dict:
+    """Trainer "Tweak": re-render one option of a set with per-lane volume / end changes."""
+    sys.path.insert(0, HERE)
+    import copy
+    from conductor import ab, routes
+    qid, k, tw = str(body["quad"]), int(body["k"]), dict(body.get("tweaks") or {})
+    quads = json.load(open(os.path.join(ROOT, "ab", "quads.json"), encoding="utf-8"))
+    q = next(x for x in quads if x["id"] == qid)
+    with _TWEAK_LOCK:
+        if TWEAK["by"] is None:
+            TWEAK["by"] = {t.title: t for t in ab.training_library().tracks}
+        r = copy.deepcopy(q["options"][k])
+        if q.get("stretch"):
+            r["stretch"] = q["stretch"]
+        TWEAK["n"] += 1
+        clip = f"ab/clips/{qid}_p{k}_tw{TWEAK['n']}_{int(time.time())}.mp3"
+        routes.TWEAKS = {ln: {kk: float(v) for kk, v in d.items() if kk in ("db", "end")} for ln, d in tw.items()}
+        try:
+            seams = routes.render(TWEAK["by"], r, os.path.join(ROOT, clip))
+            plan = routes.LAST_PLAN
+        finally:
+            routes.TWEAKS = {}
+    return {"clip": clip, "seams": seams, "plan": plan}
 LIVE_DIR = os.path.join(ROOT, "live")
 
 
@@ -144,6 +172,19 @@ class H(SimpleHTTPRequestHandler):
             _live_start(float(body.get("from", 0)), str(body.get("playlist") or "Darktide II")) if route == "/live_start" else _live_stop()
             self.send_response(200); self.send_header("Content-Length", "2"); self.end_headers(); self.wfile.write(b"{}")
             return
+        if route == "/ab_tweak":
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                out = _tweak_render(json.loads(self.rfile.read(n) or b"{}"))
+                code = 200
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                out, code = {"error": str(e)}, 500
+            body = json.dumps(out, default=float).encode()
+            self.send_response(code); self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+            return
         if route not in FILES:
             self.send_response(404); self.end_headers(); return
         target = FILES[route]
@@ -159,4 +200,15 @@ class H(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"review: http://127.0.0.1:{PORT}/review.html?m={MISSION}", flush=True)
+
+    def _warm():                                    # the trainer's Tweak renders fast from the first one
+        try:
+            sys.path.insert(0, HERE)
+            from conductor import ab
+            with _TWEAK_LOCK:
+                if TWEAK["by"] is None:
+                    TWEAK["by"] = {t.title: t for t in ab.training_library().tracks}
+        except Exception as e:
+            print("tweak warm-up:", e, flush=True)
+    _threading.Thread(target=_warm, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
