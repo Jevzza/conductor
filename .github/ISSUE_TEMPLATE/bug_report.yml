@@ -1,0 +1,35 @@
+name: Bug report
+description: Something doesn't work (install, adding music, in game, standalone)
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - In game (Darktide mod)
+        - Standalone (tabletop page)
+        - Installing / first start
+        - Adding a playlist (Spotify / YouTube / own files)
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Windows or Linux, and your graphics card (e.g. "Windows 11, RTX 3070")
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Attach or paste the end of the relevant log from mods\conductor\data\:
+        boot.log (first start / app start), cache\conductor.log (music app), cache\addlist.log (playlists).
+      render: text
